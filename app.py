@@ -99,17 +99,6 @@ def init_availability_headers():
     except Exception:
         pass  # Don't crash the app if this fails
  
-@st.cache_data(ttl=30)
-def read_names_from_sheet():
-    """Read extra names persisted in the 'names' Google Sheet tab."""
-    try:
-        sh = get_sheet()
-        ws = sh.worksheet("names")
-        vals = ws.col_values(1)
-        return [v.strip() for v in vals if v.strip() and v.strip().lower() != "name"]
-    except Exception:
-        return []
- 
 def write_names_to_sheet(names: list):
     sh = get_sheet()
     ws = sh.worksheet("names")
@@ -150,17 +139,21 @@ if "sheets_data" not in st.session_state:
     st.session_state["sheets_data"] = read_all_sheets()
  
 # ── Names ─────────────────────────────────────────────────────────────────────
-def read_names_from_sheet():
+def get_extra_names():
+    """Get added names from cached sheets_data. Falls back gracefully."""
     names_df = st.session_state.get("sheets_data", {}).get("names", pd.DataFrame())
     if names_df.empty:
         return []
-    col = next((c for c in names_df.columns if c.lower() == "name"), None)
+    # Accept 'Name' header or treat first column as names list
+    col = next((c for c in names_df.columns if c.strip().lower() == "name"), None)
+    if not col and len(names_df.columns) > 0:
+        col = names_df.columns[0]
     if not col:
         return []
-    return [v.strip() for v in names_df[col] if v.strip()]
+    return [v.strip() for v in names_df[col] if str(v).strip() and str(v).strip().lower() != "name"]
  
 # ── Load names ────────────────────────────────────────────────────────────────
-extra_names = read_names_from_sheet()
+extra_names = get_extra_names()
 ALL_NAMES = sorted(set(BASE_NAMES) | set(extra_names))
  
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -185,7 +178,8 @@ with st.sidebar:
         else:
             updated = sorted(set(extra_names) | {name_clean})
             write_names_to_sheet(updated)
-            refresh_data()
+            read_all_sheets.clear()
+            st.session_state["sheets_data"] = read_all_sheets()
             st.success(f"✅ Added **{name_clean}**! Select your name above.")
             st.rerun()
  
@@ -254,9 +248,15 @@ with tab1:
  
     # ── Calendar session state ────────────────────────────────────────────────
     ss_key = f"cal_state_{user}"
-    if ss_key not in st.session_state or st.session_state.get("cal_user_loaded") != user:
+    if ss_key not in st.session_state:
+        # First time this user loads — seed from sheet data
         st.session_state[ss_key] = dict(saved_state)
-        st.session_state["cal_user_loaded"] = user
+    else:
+        # Already have local state — sync any sheet values that are newer
+        # (e.g. saved on another device, or just after a save+rerun)
+        for day, val in saved_state.items():
+            if val and not st.session_state[ss_key].get(day):
+                st.session_state[ss_key][day] = val
  
     # Month navigation: 0 = May 2026, 1 = June 2026
     if "cal_month_idx" not in st.session_state:
@@ -283,7 +283,18 @@ with tab1:
                         update_row("availability", existing_idx, row)
                     else:
                         append_row("availability", row)
-                    refresh_data()
+                    read_all_sheets.clear()
+                    st.session_state["sheets_data"] = read_all_sheets()
+                    # Re-seed this user's session state from freshly loaded sheet
+                    fresh_avail = st.session_state["sheets_data"].get("availability", pd.DataFrame())
+                    if not fresh_avail.empty and "Name" in fresh_avail.columns:
+                        match2 = fresh_avail[fresh_avail["Name"] == user]
+                        if not match2.empty:
+                            fresh_row = match2.iloc[0]
+                            for day in ALL_DAYS:
+                                v = str(fresh_row.get(day, "")).strip()
+                                if v in ("✓", "✗"):
+                                    st.session_state[ss_key][day] = v
                     st.success("✅ Saved!")
                     st.rerun()
                 except Exception as e:
@@ -485,7 +496,8 @@ def ideas_tab(tab, sheet_tab, label):
                                 append_row(sheet_tab,
                                            [user, title.strip(), desc.strip(),
                                             link.strip(), price.strip()])
-                                refresh_data()
+                                read_all_sheets.clear()
+                                st.session_state["sheets_data"] = read_all_sheets()
                                 st.success(f"✅ {label} idea submitted!")
                                 st.rerun()
                             except Exception as e:
@@ -502,9 +514,19 @@ with tab4:
     st.caption("Rank your top 3 picks for events and dining. You can update anytime.")
  
     try:
-        events_df = get_data("events")
-        dining_df = get_data("dining")
-        votes_df  = get_data("votes")
+        # Always read fresh so tally reflects latest votes immediately
+        _sh = get_sheet()
+        def _read_fresh(tab):
+            ws = _sh.worksheet(tab)
+            vals = ws.get_all_values()
+            if not vals or len(vals) < 2:
+                return pd.DataFrame()
+            hdrs = [h.strip() for h in vals[0]]
+            rows = [r + [""] * (len(hdrs) - len(r)) for r in vals[1:]]
+            return pd.DataFrame(rows, columns=hdrs)
+        events_df = _read_fresh("events")
+        dining_df = _read_fresh("dining")
+        votes_df  = _read_fresh("votes")
     except Exception as e:
         st.error(f"Could not load voting data: {e}")
         events_df = dining_df = votes_df = pd.DataFrame()
@@ -663,8 +685,10 @@ with tab4:
                 else:
                     append_row("votes", new_row)
  
-                refresh_data()
+                read_all_sheets.clear()
+                st.session_state["sheets_data"] = read_all_sheets()
                 st.success("✅ Votes saved!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving votes: {e}")
+ 
