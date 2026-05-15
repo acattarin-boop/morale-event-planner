@@ -13,16 +13,20 @@ BASE_NAMES = [
     "Kyle", "Leo", "Meng", "Peter", "Ranga", "Sesha", "Vivian"
 ]
  
-def get_june_weekdays():
+def get_event_weekdays():
+    """Return all weekdays in May and June 2026."""
     days = []
-    d = date(2026, 6, 1)
-    while d.month == 6:
-        if d.weekday() < 5:
-            days.append(d.strftime("%a %b %d"))
-        d += timedelta(days=1)
+    for month in [5, 6]:
+        d = date(2026, month, 1)
+        while d.month == month:
+            if d.weekday() < 5:
+                days.append(d.strftime("%a %b %d"))
+            d += timedelta(days=1)
     return days
  
-JUNE_DAYS = get_june_weekdays()
+ALL_DAYS = get_event_weekdays()
+# Keep JUNE_DAYS as alias so rest of code still works if referenced
+JUNE_DAYS = ALL_DAYS
  
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 def get_sheet():
@@ -198,36 +202,24 @@ tab1, tab2, tab3, tab4 = st.tabs(["📅 Availability", "🎯 Events", "🍽️ D
 # TAB 1 · AVAILABILITY
 # ═════════════════════════════════════════════════════════════════════════════
 with tab1:
-    st.subheader("When are you available in June?")
+    st.subheader("When are you available?")
  
     avail_df = get_data("availability")
+    today = date.today()
  
-    # Normalise avail_df column names to match JUNE_DAYS format exactly
-    # Build a mapping from normalised sheet header -> JUNE_DAYS key
+    # Normalise column names
     if not avail_df.empty:
         avail_df.columns = [c.strip() for c in avail_df.columns]
-        # Build a lookup: normalised-lowercase -> actual JUNE_DAY string
-        june_day_lookup = {d.lower().replace(" 0", " "): d for d in JUNE_DAYS}
-        # Rename sheet columns to match JUNE_DAYS if they differ only by zero-padding
+        day_lookup = {d.lower().replace(" 0", " "): d for d in ALL_DAYS}
         rename_map = {}
         for col in avail_df.columns:
-            normalised = col.lower().replace(" 0", " ")
-            if normalised in june_day_lookup and col != june_day_lookup[normalised]:
-                rename_map[col] = june_day_lookup[normalised]
+            norm = col.lower().replace(" 0", " ")
+            if norm in day_lookup and col != day_lookup[norm]:
+                rename_map[col] = day_lookup[norm]
         if rename_map:
             avail_df = avail_df.rename(columns=rename_map)
  
-    # Per-day availability counts
-    day_counts = {}
-    total_users = len(avail_df) if not avail_df.empty else 0
-    for day in JUNE_DAYS:
-        if not avail_df.empty and day in avail_df.columns:
-            day_counts[day] = int(avail_df[day].apply(
-                lambda v: 1 if str(v).strip() == "✓" else 0).sum())
-        else:
-            day_counts[day] = 0
- 
-    # Load this user's saved state
+    # Load user's saved state
     existing_row = None
     existing_idx = None
     if not avail_df.empty and "Name" in avail_df.columns:
@@ -237,7 +229,7 @@ with tab1:
             existing_idx = int(match.index[0]) + 2
  
     saved_state = {}
-    for day in JUNE_DAYS:
+    for day in ALL_DAYS:
         val = ""
         if existing_row is not None and day in existing_row:
             v = str(existing_row[day]).strip()
@@ -245,94 +237,92 @@ with tab1:
                 val = v
         saved_state[day] = val
  
-    # Per-day name lists (all users)
-    day_avail_names   = {d: [] for d in JUNE_DAYS}
-    day_unavail_names = {d: [] for d in JUNE_DAYS}
+    # Per-day name lists
+    day_avail_names   = {d: [] for d in ALL_DAYS}
+    day_unavail_names = {d: [] for d in ALL_DAYS}
     if not avail_df.empty and "Name" in avail_df.columns:
         for _, arow in avail_df.iterrows():
             aname = str(arow.get("Name", "")).strip()
             if not aname:
                 continue
-            for day in JUNE_DAYS:
+            for day in ALL_DAYS:
                 v = str(arow.get(day, "")).strip()
                 if v == "✓":
                     day_avail_names[day].append(aname)
                 elif v == "✗":
                     day_unavail_names[day].append(aname)
  
-    # Build June 2026 calendar grid (starts Monday = offset 0)
-    all_june = []
-    d = date(2026, 6, 1)
-    while d.month == 6:
-        all_june.append(d)
-        d += timedelta(days=1)
-    start_offset = date(2026, 6, 1).weekday()
-    grid = [None] * start_offset + all_june
-    while len(grid) % 7 != 0:
-        grid.append(None)
- 
-    grid_data = []
-    for cell in grid:
-        if cell is None:
-            grid_data.append({"day_num": None, "day_str": None, "is_weekday": False})
-        else:
-            ds = cell.strftime("%a %b %d")
-            iw = cell.weekday() < 5
-            grid_data.append({"day_num": cell.day, "day_str": ds if iw else None, "is_weekday": iw})
- 
-    identified_js          = "true" if identified else "false"
-    user_js                = json.dumps(user)
-    grid_data_json         = json.dumps(grid_data)
-    june_days_json         = json.dumps(JUNE_DAYS)
-    saved_state_json       = json.dumps(saved_state)
-    day_avail_names_json   = json.dumps(day_avail_names)
-    day_unavail_names_json = json.dumps(day_unavail_names)
- 
-    # ── Calendar state ────────────────────────────────────────────────────────
+    # ── Calendar session state ────────────────────────────────────────────────
     ss_key = f"cal_state_{user}"
     if ss_key not in st.session_state or st.session_state.get("cal_user_loaded") != user:
         st.session_state[ss_key] = dict(saved_state)
         st.session_state["cal_user_loaded"] = user
  
-    cal_state = st.session_state[ss_key]
+    # Month navigation: 0 = May 2026, 1 = June 2026
+    if "cal_month_idx" not in st.session_state:
+        # Default to current month if within range, else May
+        st.session_state["cal_month_idx"] = 1 if today.month >= 6 else 0
+ 
+    cal_state  = st.session_state[ss_key]
+    month_idx  = st.session_state["cal_month_idx"]
+    months     = [(2026, 5, "May 2026"), (2026, 6, "June 2026")]
+    yr, mo, mo_label = months[month_idx]
  
     def set_day(day, val):
         cal_state[day] = "" if cal_state.get(day) == val else val
         st.session_state[ss_key] = cal_state
  
-    # ── Save button ABOVE calendar ────────────────────────────────────────────
-    if identified:
-        scol1, scol2 = st.columns([1, 3])
-        with scol1:
+    # ── Save button + nav header ──────────────────────────────────────────────
+    h1, h2, h3, h4, h5 = st.columns([2, 1, 2, 1, 3])
+    with h1:
+        if identified:
             if st.button("💾 Save Availability", type="primary", use_container_width=True):
-                row = [user] + [cal_state.get(d, "") for d in JUNE_DAYS]
+                row = [user] + [cal_state.get(d, "") for d in ALL_DAYS]
                 try:
                     if existing_idx:
                         update_row("availability", existing_idx, row)
                     else:
                         append_row("availability", row)
                     refresh_data()
-                    st.success("✅ Availability saved!")
+                    st.success("✅ Saved!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error saving availability: {e}")
-        with scol2:
-            st.caption("✅ = available · ❌ = not available · press same button again to clear")
+                    st.error(f"Error: {e}")
+    with h2:
+        if st.button("◀", use_container_width=True, disabled=(month_idx == 0)):
+            st.session_state["cal_month_idx"] = 0
+            st.rerun()
+    with h3:
+        st.markdown(
+            f"<div style='text-align:center;font-size:16px;font-weight:600;"
+            f"padding:6px 0;color:#3c4043'>📅 {mo_label}</div>",
+            unsafe_allow_html=True)
+    with h4:
+        if st.button("▶", use_container_width=True, disabled=(month_idx == 1)):
+            st.session_state["cal_month_idx"] = 1
+            st.rerun()
+    with h5:
+        st.caption("✅ = available · ❌ = not available · press again to clear · then 💾 Save")
  
+    # ── Build calendar grid for current month ─────────────────────────────────
+    all_month_days = []
+    d = date(yr, mo, 1)
+    while d.month == mo:
+        all_month_days.append(d)
+        d += timedelta(days=1)
+ 
+    start_offset = date(yr, mo, 1).weekday()  # 0=Mon
+    grid = [None] * start_offset + all_month_days
+    while len(grid) % 7 != 0:
+        grid.append(None)
+ 
+    # ── Calendar header ───────────────────────────────────────────────────────
     st.markdown("""
     <style>
-    .cal-hdr{background:#fff;border-radius:12px 12px 0 0;border:1px solid #e0e0e0;
-             border-bottom:none;padding:16px 20px 10px;display:flex;align-items:center;gap:12px}
-    .cal-title-txt{font-family:sans-serif;font-size:18px;font-weight:500;color:#3c4043}
-    .cal-legend{display:flex;gap:14px;margin-left:auto;align-items:center}
-    .leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#5f6368}
-    .leg-dot{width:10px;height:10px;border-radius:50%}
-    .lg{background:#34a853}.lr{background:#ea4335}.lgr{background:#e0e0e0;border:1px solid #ccc}
     .dow-hdr{display:grid;grid-template-columns:repeat(7,1fr);
-             border:1px solid #e0e0e0;border-top:none;background:#f8f9fa}
+             border:1px solid #e0e0e0;background:#f8f9fa;margin-top:4px}
     .dow-cell{text-align:center;padding:7px 0;font-size:10px;font-weight:600;
               text-transform:uppercase;letter-spacing:.08em;color:#70757a}
-    /* Only shrink buttons inside .cal-day-btn divs */
     .cal-day-btn button {
         padding: 1px 2px !important;
         min-height: 22px !important;
@@ -341,14 +331,6 @@ with tab1:
         line-height: 1 !important;
     }
     </style>
-    <div class="cal-hdr">
-      <span class="cal-title-txt">📅 June 2026</span>
-      <div class="cal-legend">
-        <div class="leg-item"><div class="leg-dot lg"></div>Available</div>
-        <div class="leg-item"><div class="leg-dot lr"></div>Not available</div>
-        <div class="leg-item"><div class="leg-dot lgr"></div>No response</div>
-      </div>
-    </div>
     <div class="dow-hdr">
       <div class="dow-cell">Mon</div><div class="dow-cell">Tue</div>
       <div class="dow-cell">Wed</div><div class="dow-cell">Thu</div>
@@ -372,56 +354,65 @@ with tab1:
                         f"color:#ccc;font-size:11px;border-radius:4px'>{day_label}</div>",
                         unsafe_allow_html=True)
                 else:
-                    ds = cell.strftime("%a %b %d")
-                    s  = cal_state.get(ds, "")
+                    ds       = cell.strftime("%a %b %d")
+                    s        = cal_state.get(ds, "")
+                    is_past  = cell < today
+                    in_range = ds in ALL_DAYS
  
-                    if s == "✓":
-                        bg = "#e6f4ea"; bdr = "#34a853"; num_bg = "#34a853"; num_col = "#fff"
-                    elif s == "✗":
-                        bg = "#fce8e6"; bdr = "#ea4335"; num_bg = "#ea4335"; num_col = "#fff"
+                    if is_past or not in_range:
+                        # Past or non-event day — greyed out, not clickable
+                        st.markdown(
+                            f"<div style='min-height:110px;background:#f5f5f5;"
+                            f"border:1px solid #eee;padding:6px 4px;"
+                            f"border-radius:4px;opacity:0.5'>"
+                            f"<span style='font-size:11px;color:#bbb;font-weight:600'>{cell.day}</span>"
+                            f"</div>",
+                            unsafe_allow_html=True)
                     else:
-                        bg = "#fff"; bdr = "#e8eaed"; num_bg = "#f1f3f4"; num_col = "#3c4043"
- 
-                    # Name chips
-                    chips = ""
-                    if identified:
                         if s == "✓":
-                            chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#34a853;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                            bg = "#e6f4ea"; bdr = "#34a853"; num_bg = "#34a853"; num_col = "#fff"
                         elif s == "✗":
-                            chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#ea4335;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
-                    for n in day_avail_names.get(ds, []):
-                        if n != user:
-                            chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#34a85320;color:#1a7a38;border:1px solid #34a85340;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
-                    for n in day_unavail_names.get(ds, []):
-                        if n != user:
-                            chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#ea433520;color:#b71c1c;border:1px solid #ea433540;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                            bg = "#fce8e6"; bdr = "#ea4335"; num_bg = "#ea4335"; num_col = "#fff"
+                        else:
+                            bg = "#fff"; bdr = "#e8eaed"; num_bg = "#f1f3f4"; num_col = "#3c4043"
  
-                    st.markdown(
-                        f"<div style='background:{bg};border:1px solid {bdr};"
-                        f"border-radius:4px 4px 0 0;padding:5px 4px;min-height:80px'>"
-                        f"<span style='display:inline-flex;align-items:center;justify-content:center;"
-                        f"width:22px;height:22px;border-radius:50%;background:{num_bg};"
-                        f"color:{num_col};font-size:11px;font-weight:600;margin-bottom:3px'>"
-                        f"{cell.day}</span>"
-                        f"<div>{chips}</div></div>",
-                        unsafe_allow_html=True)
+                        chips = ""
+                        if identified:
+                            if s == "✓":
+                                chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#34a853;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                            elif s == "✗":
+                                chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#ea4335;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                        for n in day_avail_names.get(ds, []):
+                            if n != user:
+                                chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#34a85320;color:#1a7a38;border:1px solid #34a85340;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                        for n in day_unavail_names.get(ds, []):
+                            if n != user:
+                                chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#ea433520;color:#b71c1c;border:1px solid #ea433540;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
  
-                    if identified:
-                        st.markdown('<div class="cal-day-btn">', unsafe_allow_html=True)
-                        b1, b2 = st.columns(2, gap="small")
-                        with b1:
-                            if st.button("✅", key=f"avail_{ds}",
-                                         help="Mark available",
-                                         use_container_width=True):
-                                set_day(ds, "✓")
-                                st.rerun()
-                        with b2:
-                            if st.button("❌", key=f"unavail_{ds}",
-                                         help="Mark not available",
-                                         use_container_width=True):
-                                set_day(ds, "✗")
-                                st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f"<div style='background:{bg};border:1px solid {bdr};"
+                            f"border-radius:4px 4px 0 0;padding:5px 4px;min-height:80px'>"
+                            f"<span style='display:inline-flex;align-items:center;justify-content:center;"
+                            f"width:22px;height:22px;border-radius:50%;background:{num_bg};"
+                            f"color:{num_col};font-size:11px;font-weight:600;margin-bottom:3px'>"
+                            f"{cell.day}</span>"
+                            f"<div>{chips}</div></div>",
+                            unsafe_allow_html=True)
+ 
+                        if identified:
+                            st.markdown('<div class="cal-day-btn">', unsafe_allow_html=True)
+                            b1, b2 = st.columns(2, gap="small")
+                            with b1:
+                                if st.button("✅", key=f"avail_{ds}", help="Mark available",
+                                             use_container_width=True):
+                                    set_day(ds, "✓")
+                                    st.rerun()
+                            with b2:
+                                if st.button("❌", key=f"unavail_{ds}", help="Mark not available",
+                                             use_container_width=True):
+                                    set_day(ds, "✗")
+                                    st.rerun()
+                            st.markdown('</div>', unsafe_allow_html=True)
  
     st.markdown("<br>", unsafe_allow_html=True)
  
