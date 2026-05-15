@@ -160,9 +160,12 @@ with tab1:
  
     try:
         avail_df = read_sheet("availability")
+        st.session_state["avail_df_cache"] = avail_df
     except Exception as e:
-        st.error(f"Could not load availability data: {e}")
-        avail_df = pd.DataFrame()
+        # On rerun from button click, use cached version to avoid re-fetching
+        avail_df = st.session_state.get("avail_df_cache", pd.DataFrame())
+        if avail_df.empty:
+            st.error(f"Could not load availability data: {e}")
  
     # Normalise avail_df column names to match JUNE_DAYS format exactly
     # Build a mapping from normalised sheet header -> JUNE_DAYS key
@@ -259,7 +262,6 @@ with tab1:
     cal_state = st.session_state[ss_key]
  
     def set_day(day, val):
-        # If already that value, clicking again clears it
         cal_state[day] = "" if cal_state.get(day) == val else val
         st.session_state[ss_key] = cal_state
  
@@ -276,6 +278,15 @@ with tab1:
              border:1px solid #e0e0e0;border-top:none;background:#f8f9fa}
     .dow-cell{text-align:center;padding:7px 0;font-size:10px;font-weight:600;
               text-transform:uppercase;letter-spacing:.08em;color:#70757a}
+ 
+    /* Shrink calendar toggle buttons */
+    div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] button {
+        padding: 1px 2px !important;
+        min-height: 24px !important;
+        height: 24px !important;
+        font-size: 11px !important;
+        line-height: 1 !important;
+    }
     </style>
     <div class="cal-hdr">
       <span class="cal-title-txt">📅 June 2026</span>
@@ -318,7 +329,7 @@ with tab1:
                     else:
                         bg = "#fff"; bdr = "#e8eaed"; num_bg = "#f1f3f4"; num_col = "#3c4043"
  
-                    # Build name chips
+                    # Name chips
                     chips = ""
                     if identified:
                         if s == "✓":
@@ -332,7 +343,6 @@ with tab1:
                         if n != user:
                             chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#ea433520;color:#b71c1c;border:1px solid #ea433540;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
  
-                    # Cell display
                     st.markdown(
                         f"<div style='background:{bg};border:1px solid {bdr};"
                         f"border-radius:4px 4px 0 0;padding:5px 4px;min-height:80px'>"
@@ -343,17 +353,18 @@ with tab1:
                         f"<div>{chips}</div></div>",
                         unsafe_allow_html=True)
  
-                    # Two icon buttons below each cell
                     if identified:
                         b1, b2 = st.columns(2, gap="small")
                         with b1:
-                            if st.button("🟢", key=f"avail_{ds}",
+                            # ✅ green checkmark — instant local update only
+                            if st.button("✅", key=f"avail_{ds}",
                                          help="Mark available",
                                          use_container_width=True):
                                 set_day(ds, "✓")
                                 st.rerun()
                         with b2:
-                            if st.button("🔴", key=f"unavail_{ds}",
+                            # ❌ red X — instant local update only
+                            if st.button("❌", key=f"unavail_{ds}",
                                          help="Mark not available",
                                          use_container_width=True):
                                 set_day(ds, "✗")
@@ -374,7 +385,7 @@ with tab1:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving availability: {e}")
-        st.caption("🟢 = available · 🔴 = not available · press again to clear · then Save")
+        st.caption("✅ = available · ❌ = not available · press again to clear · then 💾 Save")
  
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 & 3 · EVENTS + DINING
