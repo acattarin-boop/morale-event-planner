@@ -35,7 +35,7 @@ def get_sheet():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
  
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=300)
 def read_sheet(tab):
     sh = get_sheet()
     ws = sh.worksheet(tab)
@@ -46,6 +46,38 @@ def read_sheet(tab):
     rows = all_values[1:]
     padded = [r + [""] * (len(headers) - len(r)) for r in rows]
     return pd.DataFrame(padded, columns=headers)
+ 
+@st.cache_data(ttl=300)
+def read_all_sheets():
+    """Load all tabs in a single connection — minimises API calls."""
+    sh = get_sheet()
+    result = {}
+    for tab in ["availability", "events", "dining", "votes", "names"]:
+        try:
+            ws = sh.worksheet(tab)
+            all_values = ws.get_all_values()
+            if all_values and len(all_values) >= 2:
+                headers = [h.strip() for h in all_values[0]]
+                rows = all_values[1:]
+                padded = [r + [""] * (len(headers) - len(r)) for r in rows]
+                result[tab] = pd.DataFrame(padded, columns=headers)
+            elif all_values and len(all_values) == 1:
+                headers = [h.strip() for h in all_values[0]]
+                result[tab] = pd.DataFrame(columns=headers)
+            else:
+                result[tab] = pd.DataFrame()
+        except Exception:
+            result[tab] = pd.DataFrame()
+    return result
+ 
+def get_data(tab):
+    """Get sheet data from session state cache — no extra API calls."""
+    return st.session_state.get("sheets_data", {}).get(tab, pd.DataFrame())
+ 
+def refresh_data():
+    """Force a fresh load from Google Sheets and cache in session state."""
+    read_all_sheets.clear()
+    st.session_state["sheets_data"] = read_all_sheets()
  
 def init_availability_headers():
     """Ensure the availability sheet has the correct header row."""
@@ -109,10 +141,21 @@ h1, h2, h3 { font-family: 'DM Serif Display', serif; }
 st.title("🎉 Morale Event Planner")
 st.caption("Coordinate availability, propose ideas, and vote — all in one place.")
  
-# Ensure availability sheet has correct headers (fixes column mismatch)
-init_availability_headers()
+# ── Load ALL sheet data once at startup ───────────────────────────────────────
+if "sheets_data" not in st.session_state:
+    st.session_state["sheets_data"] = read_all_sheets()
  
-# ── Load names (persists across sessions via Google Sheet) ────────────────────
+# ── Names ─────────────────────────────────────────────────────────────────────
+def read_names_from_sheet():
+    names_df = st.session_state.get("sheets_data", {}).get("names", pd.DataFrame())
+    if names_df.empty:
+        return []
+    col = next((c for c in names_df.columns if c.lower() == "name"), None)
+    if not col:
+        return []
+    return [v.strip() for v in names_df[col] if v.strip()]
+ 
+# ── Load names ────────────────────────────────────────────────────────────────
 extra_names = read_names_from_sheet()
 ALL_NAMES = sorted(set(BASE_NAMES) | set(extra_names))
  
@@ -138,7 +181,7 @@ with st.sidebar:
         else:
             updated = sorted(set(extra_names) | {name_clean})
             write_names_to_sheet(updated)
-            read_names_from_sheet.clear()
+            refresh_data()
             st.success(f"✅ Added **{name_clean}**! Select your name above.")
             st.rerun()
  
@@ -158,14 +201,7 @@ with tab1:
     st.subheader("When are you available in June?")
     st.caption("Click a date: **green** = available · **red** = not available · click again to clear")
  
-    try:
-        avail_df = read_sheet("availability")
-        st.session_state["avail_df_cache"] = avail_df
-    except Exception as e:
-        # On rerun from button click, use cached version to avoid re-fetching
-        avail_df = st.session_state.get("avail_df_cache", pd.DataFrame())
-        if avail_df.empty:
-            st.error(f"Could not load availability data: {e}")
+    avail_df = get_data("availability")
  
     # Normalise avail_df column names to match JUNE_DAYS format exactly
     # Build a mapping from normalised sheet header -> JUNE_DAYS key
@@ -380,7 +416,7 @@ with tab1:
                     update_row("availability", existing_idx, row)
                 else:
                     append_row("availability", row)
-                read_sheet.clear()
+                refresh_data()
                 st.success("✅ Availability saved!")
                 st.rerun()
             except Exception as e:
@@ -401,7 +437,7 @@ def ideas_tab(tab, sheet_tab, label):
     with tab:
         st.subheader(f"{label} Ideas")
         try:
-            df = read_sheet(sheet_tab)
+            df = get_data(sheet_tab)
         except Exception as e:
             st.error(f"Could not load data: {e}")
             df = pd.DataFrame()
@@ -456,7 +492,7 @@ def ideas_tab(tab, sheet_tab, label):
                                 append_row(sheet_tab,
                                            [user, title.strip(), desc.strip(),
                                             link.strip(), price.strip()])
-                                read_sheet.clear()
+                                refresh_data()
                                 st.success(f"✅ {label} idea submitted!")
                                 st.rerun()
                             except Exception as e:
@@ -473,9 +509,9 @@ with tab4:
     st.caption("Rank your top 3 picks for events and dining. You can update anytime.")
  
     try:
-        events_df = read_sheet("events")
-        dining_df = read_sheet("dining")
-        votes_df  = read_sheet("votes")
+        events_df = get_data("events")
+        dining_df = get_data("dining")
+        votes_df  = get_data("votes")
     except Exception as e:
         st.error(f"Could not load voting data: {e}")
         events_df = dining_df = votes_df = pd.DataFrame()
@@ -583,7 +619,7 @@ with tab4:
                     update_row("votes", existing_vote_idx, row)
                 else:
                     append_row("votes", row)
-                read_sheet.clear()
+                refresh_data()
                 st.success("✅ Votes saved!")
                 st.rerun()
             except Exception as e:
