@@ -13,10 +13,10 @@ NAMES = [
     "Kyle", "Leo", "Meng", "Peter", "Ranga", "Sesha", "Vivian"
 ]
  
-# Generate all weekdays in June 2025
+# Generate all weekdays in June 2026
 def get_june_weekdays():
     days = []
-    d = date(2025, 6, 2)  # First Monday of June 2025
+    d = date(2026, 6, 1)
     while d.month == 6:
         if d.weekday() < 5:  # Mon-Fri
             days.append(d.strftime("%a %b %d"))
@@ -68,8 +68,8 @@ def ensure_headers():
     sh = get_sheet()
     headers = {
         "availability": ["Name"] + JUNE_DAYS,
-        "events":       ["Submitted By", "Title", "Link", "Est. Price/Person"],
-        "dining":       ["Submitted By", "Title", "Link", "Est. Price/Person"],
+        "events":       ["Submitted By", "Title", "Description", "Link", "Est. Price/Person"],
+        "dining":       ["Submitted By", "Title", "Description", "Link", "Est. Price/Person"],
         "votes":        ["Name", "Event 1st", "Event 2nd", "Event 3rd",
                          "Dining 1st", "Dining 2nd", "Dining 3rd"],
     }
@@ -118,15 +118,37 @@ st.title("🎉 Morale Event Planner")
 st.caption("Coordinate availability, propose ideas, and vote — all in one place.")
  
 # ── Name selector (persisted in session) ────────────────────────────────────
+# ── Name selector (persisted in session) ────────────────────────────────────
+if "extra_names" not in st.session_state:
+    st.session_state["extra_names"] = []
+ 
+ALL_NAMES = sorted(NAMES + st.session_state["extra_names"])
+ 
 with st.sidebar:
     st.markdown("### 👋 Who are you?")
-    user = st.selectbox("Select your name", ["— select —"] + NAMES, key="user_name")
+    user = st.selectbox("Select your name", ["— select —"] + ALL_NAMES, key="user_name")
     if user != "— select —":
         st.success(f"Hi, **{user}**!")
     else:
         st.warning("Please select your name to participate.")
+ 
     st.divider()
-    st.caption("Morale Event Planner · June 2025")
+    st.markdown("**Don't see your name?**")
+    new_name = st.text_input("Your name", placeholder="First Last", key="new_name_input", label_visibility="collapsed")
+    if st.button("➕ Add Name", use_container_width=True):
+        name_clean = new_name.strip().title()
+        if not name_clean:
+            st.warning("Please enter a name.")
+        elif name_clean in ALL_NAMES:
+            st.info(f"{name_clean} is already in the list.")
+        else:
+            st.session_state["extra_names"].append(name_clean)
+            st.success(f"Added **{name_clean}**! Select your name above.")
+            st.rerun()
+    st.caption("*Added names persist for this session. Ask your organizer to add them permanently.*")
+ 
+    st.divider()
+    st.caption("Morale Event Planner · June 2026")
  
 identified = user != "— select —"
  
@@ -176,33 +198,42 @@ with tab1:
                 val = v
         saved_state[day] = val
  
-    # ── Build full June calendar grid (Sun offset) ───────────────────────────
-    # June 2025 starts on Sunday. Grid = 7 cols, Sun–Sat
-    # We only show Mon–Fri (weekdays), weekends are greyed out placeholder cells
-    import calendar as cal_mod
-    june_days_set = set(JUNE_DAYS)
- 
-    # Build a list of all days in a Mon-Sun grid for June 2025
-    # June 1 2025 = Sunday, so Mon offset = 6 (we skip Sun col)
-    # Use a 7-col grid: Mon Tue Wed Thu Fri Sat Sun
+    # ── Build full June calendar grid for June 2026 ──────────────────────────
+    # June 1 2026 = Monday, so offset = 0
     all_june = []
-    d = date(2025, 6, 1)
+    d = date(2026, 6, 1)
     while d.month == 6:
         all_june.append(d)
         d += timedelta(days=1)
  
-    # Grid offset: Monday=0. June 1 is Sunday = weekday 6
-    start_offset = date(2025, 6, 1).weekday()  # 6 = Sunday
+    start_offset = date(2026, 6, 1).weekday()  # 0 = Monday
  
     # Build grid cells: None = empty padding, date obj = actual day
     grid = [None] * start_offset + all_june
     while len(grid) % 7 != 0:
         grid.append(None)
  
+    # ── Build per-day name lists from all submitted availability ────────────
+    day_available_names   = {d: [] for d in JUNE_DAYS}
+    day_unavailable_names = {d: [] for d in JUNE_DAYS}
+    if not avail_df.empty and "Name" in avail_df.columns:
+        for _, arow in avail_df.iterrows():
+            aname = str(arow.get("Name", "")).strip()
+            if not aname:
+                continue
+            for day in JUNE_DAYS:
+                val = str(arow.get(day, "")).strip()
+                if val == "✓":
+                    day_available_names[day].append(aname)
+                elif val == "✗":
+                    day_unavailable_names[day].append(aname)
+ 
     # ── Encode data to pass into HTML ────────────────────────────────────────
     june_days_json = json.dumps(JUNE_DAYS)
     saved_state_json = json.dumps(saved_state)
     day_counts_json = json.dumps({k: int(v) for k, v in day_counts.items()})
+    day_available_names_json   = json.dumps(day_available_names)
+    day_unavailable_names_json = json.dumps(day_unavailable_names)
  
     # Build grid_data for JS: list of {day_num, day_str, is_weekday}
     grid_data = []
@@ -229,7 +260,7 @@ with tab1:
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ font-family: 'Roboto', sans-serif; background: transparent; padding: 0; }}
  
-  .cal-wrap {{ max-width: 860px; background: #fff; border-radius: 16px;
+  .cal-wrap {{ max-width: 100%; background: #fff; border-radius: 16px;
                border: 1px solid #e0e0e0; overflow: hidden;
                box-shadow: 0 2px 12px rgba(0,0,0,0.08); }}
  
@@ -237,7 +268,7 @@ with tab1:
                  display: flex; align-items: center; gap: 16px; }}
   .cal-title {{ font-family: 'Google Sans', sans-serif; font-size: 22px;
                 font-weight: 400; color: #3c4043; }}
-  .cal-legend {{ display: flex; gap: 16px; margin-left: auto; align-items: center; }}
+  .cal-legend {{ display: flex; gap: 16px; margin-left: auto; align-items: center; flex-wrap: wrap; }}
   .leg-item {{ display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5f6368; }}
   .leg-dot {{ width: 12px; height: 12px; border-radius: 50%; }}
   .leg-green {{ background: #34a853; }}
@@ -251,9 +282,10 @@ with tab1:
  
   .cal-grid {{ display: grid; grid-template-columns: repeat(7, 1fr); }}
  
-  .cal-cell {{ min-height: 90px; border-right: 1px solid #e8eaed;
-               border-bottom: 1px solid #e8eaed; padding: 8px 6px;
-               position: relative; background: #fff; transition: background 0.15s; }}
+  .cal-cell {{ min-height: 110px; border-right: 1px solid #e8eaed;
+               border-bottom: 1px solid #e8eaed; padding: 6px 5px;
+               position: relative; background: #fff; transition: background 0.15s;
+               overflow: hidden; }}
   .cal-cell:nth-child(7n) {{ border-right: none; }}
   .cal-cell.empty {{ background: #fafafa; }}
   .cal-cell.weekend {{ background: #fafafa; cursor: default; }}
@@ -269,21 +301,21 @@ with tab1:
   .day-num {{ font-family: 'Google Sans', sans-serif; font-size: 13px;
               font-weight: 500; color: #3c4043; display: inline-flex;
               align-items: center; justify-content: center;
-              width: 28px; height: 28px; border-radius: 50%; }}
+              width: 26px; height: 26px; border-radius: 50%; margin-bottom: 3px; }}
   .cal-cell.available .day-num   {{ background: #34a853; color: #fff; }}
   .cal-cell.unavailable .day-num {{ background: #ea4335; color: #fff; }}
  
-  .status-badge {{ font-size: 10px; font-weight: 500; margin-top: 4px;
-                   padding: 2px 6px; border-radius: 10px; display: inline-block; }}
-  .badge-avail   {{ background: #34a85322; color: #1e7e34; }}
-  .badge-unavail {{ background: #ea433522; color: #c62828; }}
- 
-  .team-bar {{ margin-top: 6px; height: 4px; border-radius: 2px; background: #e0e0e0; overflow: hidden; }}
-  .team-fill {{ height: 100%; border-radius: 2px; background: #4285f4; transition: width 0.3s; }}
-  .team-count {{ font-size: 9px; color: #70757a; margin-top: 2px; }}
+  .names-list {{ display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }}
+  .name-chip {{ font-size: 9.5px; font-weight: 500; padding: 1px 5px;
+                border-radius: 8px; white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; max-width: 100%; }}
+  .chip-green {{ background: #34a85322; color: #1a7a38; border: 1px solid #34a85344; }}
+  .chip-red   {{ background: #ea433522; color: #b71c1c; border: 1px solid #ea433544; }}
+  .chip-me-green {{ background: #34a853; color: #fff; }}
+  .chip-me-red   {{ background: #ea4335; color: #fff; }}
  
   .save-row {{ padding: 16px 24px; border-top: 1px solid #e0e0e0;
-               display: flex; align-items: center; gap: 16px; background: #fff; }}
+               display: flex; align-items: center; gap: 16px; background: #fff; flex-wrap: wrap; }}
   .save-btn {{ background: #1a73e8; color: white; border: none; border-radius: 8px;
                padding: 10px 28px; font-size: 14px; font-weight: 500;
                cursor: pointer; font-family: 'Google Sans', sans-serif;
@@ -294,22 +326,19 @@ with tab1:
   .save-msg {{ font-size: 13px; font-weight: 500; }}
   .save-msg.ok  {{ color: #34a853; }}
   .save-msg.err {{ color: #ea4335; }}
- 
   .not-identified {{ padding: 20px 24px; color: #70757a; font-size: 14px; }}
 </style>
 </head>
 <body>
- 
 <div class="cal-wrap">
   <div class="cal-header">
-    <span class="cal-title">📅 June 2025</span>
+    <span class="cal-title">📅 June 2026</span>
     <div class="cal-legend">
       <div class="leg-item"><div class="leg-dot leg-green"></div> Available</div>
       <div class="leg-item"><div class="leg-dot leg-red"></div> Not available</div>
       <div class="leg-item"><div class="leg-dot leg-grey"></div> No response</div>
     </div>
   </div>
- 
   <div class="dow-row">
     <div class="dow-cell">Mon</div>
     <div class="dow-cell">Tue</div>
@@ -319,9 +348,7 @@ with tab1:
     <div class="dow-cell" style="color:#bbb">Sat</div>
     <div class="dow-cell" style="color:#bbb">Sun</div>
   </div>
- 
   <div class="cal-grid" id="calGrid"></div>
- 
   <div class="save-row" id="saveRow">
     <button class="save-btn" id="saveBtn" onclick="saveData()">💾 Save Availability</button>
     <span class="save-hint">Click once = available · Click again = not available · Click again = clear</span>
@@ -333,9 +360,9 @@ with tab1:
 const IDENTIFIED = {identified_js};
 const USER = {user_js};
 const GRID_DATA = {grid_data_json};
-const DAY_COUNTS = {day_counts_json};
-const TOTAL_USERS = {total_users_js};
 const JUNE_DAYS = {june_days_json};
+const AVAIL_NAMES   = {day_available_names_json};
+const UNAVAIL_NAMES = {day_unavailable_names_json};
  
 let state = {saved_state_json};
  
@@ -345,8 +372,7 @@ function cycle(current) {{
   return "";
 }}
  
-function cellClass(day_str, is_weekday) {{
-  if (!is_weekday) return "cal-cell weekend";
+function cellClass(day_str) {{
   if (!IDENTIFIED) return "cal-cell workday";
   const s = state[day_str] || "";
   if (s === "✓") return "cal-cell available";
@@ -376,7 +402,7 @@ function renderGrid() {{
  
     const day_str = cell.day_str;
     const s = state[day_str] || "";
-    div.className = cellClass(day_str, true);
+    div.className = cellClass(day_str);
  
     if (IDENTIFIED) {{
       div.onclick = () => {{
@@ -385,26 +411,27 @@ function renderGrid() {{
       }};
     }}
  
-    const cnt = DAY_COUNTS[day_str] || 0;
-    const pct = TOTAL_USERS > 0 ? Math.round((cnt / TOTAL_USERS) * 100) : 0;
+    // Build name chips
+    const availNames   = (AVAIL_NAMES[day_str]   || []);
+    const unavailNames = (UNAVAIL_NAMES[day_str]  || []);
  
-    let badge = "";
-    if (s === "✓") badge = `<div class="status-badge badge-avail">Available</div>`;
-    if (s === "✗") badge = `<div class="status-badge badge-unavail">Not available</div>`;
+    // Remove current user from team lists (shown via cell background instead)
+    const otherAvail   = availNames.filter(n => n !== USER);
+    const otherUnavail = unavailNames.filter(n => n !== USER);
  
-    let teamBar = "";
-    if (TOTAL_USERS > 0) {{
-      teamBar = `
-        <div class="team-bar"><div class="team-fill" style="width:${{pct}}%"></div></div>
-        <div class="team-count">${{cnt}}/${{TOTAL_USERS}} available</div>`;
-    }}
+    let chipsHtml = '<div class="names-list">';
  
-    div.innerHTML = `
-      <span class="day-num">${{cell.day_num}}</span>
-      ${{badge}}
-      ${{teamBar}}
-    `;
+    // Current user chip (bold, solid color)
+    if (s === "✓") chipsHtml += `<span class="name-chip chip-me-green">✓ ${{USER}}</span>`;
+    if (s === "✗") chipsHtml += `<span class="name-chip chip-me-red">✗ ${{USER}}</span>`;
  
+    // Other team members
+    otherAvail.forEach(n   => {{ chipsHtml += `<span class="name-chip chip-green">${{n}}</span>`; }});
+    otherUnavail.forEach(n => {{ chipsHtml += `<span class="name-chip chip-red">${{n}}</span>`; }});
+ 
+    chipsHtml += '</div>';
+ 
+    div.innerHTML = `<span class="day-num">${{cell.day_num}}</span>${{chipsHtml}}`;
     grid.appendChild(div);
   }});
 }}
@@ -417,11 +444,9 @@ function saveData() {{
   btn.textContent = "Saving...";
   msg.textContent = "";
  
-  // Encode state as compact string: days marked ✓ or ✗ joined by pipe
-  const available = JUNE_DAYS.filter(d => state[d] === "✓").map(d => encodeURIComponent(d)).join("|");
+  const available   = JUNE_DAYS.filter(d => state[d] === "✓").map(d => encodeURIComponent(d)).join("|");
   const unavailable = JUNE_DAYS.filter(d => state[d] === "✗").map(d => encodeURIComponent(d)).join("|");
  
-  // Write to parent URL query params so Streamlit can read them
   const url = new URL(window.parent.location.href);
   url.searchParams.set("cal_avail", available);
   url.searchParams.set("cal_unavail", unavailable);
@@ -449,7 +474,7 @@ renderGrid();
 """
  
     # Render the calendar component
-    components.html(calendar_html, height=620, scrolling=False)
+    components.html(calendar_html, height=780, scrolling=False)
  
     # ── Read state from query params set by the calendar JS ─────────────────
     qp = st.query_params
@@ -535,16 +560,17 @@ def ideas_tab(tab, sheet_tab, label):
                 for i, row in df.iterrows():
                     title_val = get_col(row, "Title", "title", "TITLE")
                     by_val    = get_col(row, "Submitted By", "submitted by", "submitted_by", "Name")
+                    desc_val  = get_col(row, "Description", "description", "Desc")
                     link_val  = get_col(row, "Link", "link", "LINK", "Website", "URL")
                     price_val = get_col(row, "Est. Price/Person", "Est. Price", "Price", "price", "est. price/person")
  
                     with st.container(border=True):
-                        # Title + submitter
                         title_display = title_val if title_val else "Untitled"
                         by_display    = by_val    if by_val    else "Unknown"
                         st.markdown(f"**{title_display}**")
                         st.caption(f"Suggested by {by_display}")
-                        # Link + price on same row
+                        if desc_val:
+                            st.markdown(f"<span style='font-size:0.85rem;color:#555'>{desc_val}</span>", unsafe_allow_html=True)
                         meta_cols = st.columns([2, 1])
                         if link_val and link_val.startswith("http"):
                             meta_cols[0].markdown(f"[🔗 More Info]({link_val})")
@@ -558,6 +584,7 @@ def ideas_tab(tab, sheet_tab, label):
             else:
                 with st.form(key=f"form_{sheet_tab}", clear_on_submit=True):
                     title = st.text_input("Title *", placeholder="e.g. Bowling Night")
+                    desc  = st.text_area("Description (optional)", placeholder="Tell the team a bit more about this idea...", height=80)
                     link  = st.text_input("Link (optional)", placeholder="https://...")
                     price = st.text_input("Est. Price/Person (optional)", placeholder="e.g. 25")
                     submitted = st.form_submit_button("Submit Idea", type="primary", use_container_width=True)
@@ -566,7 +593,7 @@ def ideas_tab(tab, sheet_tab, label):
                             st.warning("Please enter a title.")
                         else:
                             try:
-                                append_row(sheet_tab, [user, title.strip(), link.strip(), price.strip()])
+                                append_row(sheet_tab, [user, title.strip(), desc.strip(), link.strip(), price.strip()])
                                 st.success(f"✅ {label} idea submitted!")
                                 st.rerun()
                             except Exception as e:
@@ -664,9 +691,9 @@ with tab4:
                 e1_def = existing_vote.get("Event 1st", none_opt) if existing_vote is not None else none_opt
                 e2_def = existing_vote.get("Event 2nd", none_opt) if existing_vote is not None else none_opt
                 e3_def = existing_vote.get("Event 3rd", none_opt) if existing_vote is not None else none_opt
-                e1 = st.selectbox("🥇 1st Choice", e_opts, index=e_opts.index(e1_def) if e1_def in e_opts else 0, key="e1")
-                e2 = st.selectbox("🥈 2nd Choice", e_opts, index=e_opts.index(e2_def) if e2_def in e_opts else 0, key="e2")
-                e3 = st.selectbox("🥉 3rd Choice", e_opts, index=e_opts.index(e3_def) if e3_def in e_opts else 0, key="e3")
+                e1 = st.selectbox("🥇 1st Choice (3 pts)", e_opts, index=e_opts.index(e1_def) if e1_def in e_opts else 0, key="e1")
+                e2 = st.selectbox("🥈 2nd Choice (2 pts)", e_opts, index=e_opts.index(e2_def) if e2_def in e_opts else 0, key="e2")
+                e3 = st.selectbox("🥉 3rd Choice (1 pt)",  e_opts, index=e_opts.index(e3_def) if e3_def in e_opts else 0, key="e3")
             else:
                 st.info("Add event ideas first.")
                 e1 = e2 = e3 = none_opt
@@ -678,9 +705,9 @@ with tab4:
                 d1_def = existing_vote.get("Dining 1st", none_opt) if existing_vote is not None else none_opt
                 d2_def = existing_vote.get("Dining 2nd", none_opt) if existing_vote is not None else none_opt
                 d3_def = existing_vote.get("Dining 3rd", none_opt) if existing_vote is not None else none_opt
-                d1 = st.selectbox("🥇 1st Choice", d_opts, index=d_opts.index(d1_def) if d1_def in d_opts else 0, key="d1")
-                d2 = st.selectbox("🥈 2nd Choice", d_opts, index=d_opts.index(d2_def) if d2_def in d_opts else 0, key="d2")
-                d3 = st.selectbox("🥉 3rd Choice", d_opts, index=d_opts.index(d3_def) if d3_def in d_opts else 0, key="d3")
+                d1 = st.selectbox("🥇 1st Choice (3 pts)", d_opts, index=d_opts.index(d1_def) if d1_def in d_opts else 0, key="d1")
+                d2 = st.selectbox("🥈 2nd Choice (2 pts)", d_opts, index=d_opts.index(d2_def) if d2_def in d_opts else 0, key="d2")
+                d3 = st.selectbox("🥉 3rd Choice (1 pt)",  d_opts, index=d_opts.index(d3_def) if d3_def in d_opts else 0, key="d3")
             else:
                 st.info("Add dining ideas first.")
                 d1 = d2 = d3 = none_opt
