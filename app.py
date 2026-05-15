@@ -199,7 +199,6 @@ tab1, tab2, tab3, tab4 = st.tabs(["📅 Availability", "🎯 Events", "🍽️ D
 # ═════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.subheader("When are you available in June?")
-    st.caption("Click a date: **green** = available · **red** = not available · click again to clear")
  
     avail_df = get_data("availability")
  
@@ -300,6 +299,25 @@ with tab1:
     def set_day(day, val):
         cal_state[day] = "" if cal_state.get(day) == val else val
         st.session_state[ss_key] = cal_state
+ 
+    # ── Save button ABOVE calendar ────────────────────────────────────────────
+    if identified:
+        scol1, scol2 = st.columns([1, 3])
+        with scol1:
+            if st.button("💾 Save Availability", type="primary", use_container_width=True):
+                row = [user] + [cal_state.get(d, "") for d in JUNE_DAYS]
+                try:
+                    if existing_idx:
+                        update_row("availability", existing_idx, row)
+                    else:
+                        append_row("availability", row)
+                    refresh_data()
+                    st.success("✅ Availability saved!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving availability: {e}")
+        with scol2:
+            st.caption("✅ = available · ❌ = not available · press same button again to clear")
  
     st.markdown("""
     <style>
@@ -408,21 +426,6 @@ with tab1:
  
     st.markdown("<br>", unsafe_allow_html=True)
  
-    if identified:
-        if st.button("💾 Save Availability", type="primary"):
-            row = [user] + [cal_state.get(d, "") for d in JUNE_DAYS]
-            try:
-                if existing_idx:
-                    update_row("availability", existing_idx, row)
-                else:
-                    append_row("availability", row)
-                refresh_data()
-                st.success("✅ Availability saved!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error saving availability: {e}")
-        st.caption("✅ = available · ❌ = not available · press again to clear · then 💾 Save")
- 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 & 3 · EVENTS + DINING
 # ═════════════════════════════════════════════════════════════════════════════
@@ -459,18 +462,18 @@ def ideas_tab(tab, sheet_tab, label):
                     link_val  = get_col(row, "Link", "link", "Website", "URL")
                     price_val = get_col(row, "Est. Price/Person", "Est. Price", "Price", "price")
  
-                    with st.container(border=True):
-                        st.markdown(f"**{title_val or 'Untitled'}**")
-                        st.caption(f"Suggested by {by_val or 'Unknown'}")
-                        if desc_val:
-                            st.markdown(
-                                f"<span style='font-size:0.85rem;color:#555'>{desc_val}</span>",
-                                unsafe_allow_html=True)
-                        mc = st.columns([2, 1])
-                        if link_val and link_val.startswith("http"):
-                            mc[0].markdown(f"[🔗 More Info]({link_val})")
-                        if price_val:
-                            mc[1].markdown(f"💰 **${price_val}/pp**")
+                    # Compact single-line tile
+                    link_html = f' &nbsp;<a href="{link_val}" target="_blank" style="font-size:0.75rem">🔗</a>' if link_val and link_val.startswith("http") else ""
+                    price_html = f'<span style="float:right;font-size:0.75rem;color:#555">💰${price_val}/pp</span>' if price_val else ""
+                    desc_html = f'<div style="font-size:0.75rem;color:#777;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{desc_val}</div>' if desc_val else ""
+                    st.markdown(
+                        f'<div style="border:1px solid #e0e0e0;border-radius:6px;padding:5px 10px;margin-bottom:4px;background:#fff">'
+                        f'{price_html}'
+                        f'<span style="font-size:0.85rem;font-weight:600">{title_val or "Untitled"}</span>{link_html}'
+                        f'<span style="font-size:0.72rem;color:#999;margin-left:6px">by {by_val or "Unknown"}</span>'
+                        f'{desc_html}'
+                        f'</div>',
+                        unsafe_allow_html=True)
  
         with col_form:
             st.markdown(f"#### ➕ Add a {label} Idea")
@@ -581,6 +584,9 @@ with tab4:
         st.markdown(f"#### {user}'s Votes")
         none_opt = "— no pick —"
  
+        if existing_vote is not None:
+            st.info("You've already voted. Making new selections will **overwrite** your previous vote.")
+ 
         col1, col2 = st.columns(2)
  
         with col1:
@@ -591,8 +597,15 @@ with tab4:
                     v = str(existing_vote.get(key, none_opt)).strip() if existing_vote is not None else none_opt
                     return e_opts.index(v) if v in e_opts else 0
                 e1 = st.selectbox("🥇 1st Choice (3 pts)", e_opts, index=ei("Event 1st"), key="e1")
-                e2 = st.selectbox("🥈 2nd Choice (2 pts)", e_opts, index=ei("Event 2nd"), key="e2")
-                e3 = st.selectbox("🥉 3rd Choice (1 pt)",  e_opts, index=ei("Event 3rd"), key="e3")
+                # Filter out already-picked options for 2nd and 3rd
+                e2_opts = [o for o in e_opts if o == none_opt or o != e1]
+                e2_def = str(existing_vote.get("Event 2nd", none_opt)).strip() if existing_vote is not None else none_opt
+                e2_def = e2_def if e2_def in e2_opts else none_opt
+                e2 = st.selectbox("🥈 2nd Choice (2 pts)", e2_opts, index=e2_opts.index(e2_def), key="e2")
+                e3_opts = [o for o in e_opts if o == none_opt or (o != e1 and o != e2)]
+                e3_def = str(existing_vote.get("Event 3rd", none_opt)).strip() if existing_vote is not None else none_opt
+                e3_def = e3_def if e3_def in e3_opts else none_opt
+                e3 = st.selectbox("🥉 3rd Choice (1 pt)", e3_opts, index=e3_opts.index(e3_def), key="e3")
             else:
                 st.info("Add event ideas first.")
                 e1 = e2 = e3 = none_opt
@@ -605,8 +618,14 @@ with tab4:
                     v = str(existing_vote.get(key, none_opt)).strip() if existing_vote is not None else none_opt
                     return d_opts.index(v) if v in d_opts else 0
                 d1 = st.selectbox("🥇 1st Choice (3 pts)", d_opts, index=di("Dining 1st"), key="d1")
-                d2 = st.selectbox("🥈 2nd Choice (2 pts)", d_opts, index=di("Dining 2nd"), key="d2")
-                d3 = st.selectbox("🥉 3rd Choice (1 pt)",  d_opts, index=di("Dining 3rd"), key="d3")
+                d2_opts = [o for o in d_opts if o == none_opt or o != d1]
+                d2_def = str(existing_vote.get("Dining 2nd", none_opt)).strip() if existing_vote is not None else none_opt
+                d2_def = d2_def if d2_def in d2_opts else none_opt
+                d2 = st.selectbox("🥈 2nd Choice (2 pts)", d2_opts, index=d2_opts.index(d2_def), key="d2")
+                d3_opts = [o for o in d_opts if o == none_opt or (o != d1 and o != d2)]
+                d3_def = str(existing_vote.get("Dining 3rd", none_opt)).strip() if existing_vote is not None else none_opt
+                d3_def = d3_def if d3_def in d3_opts else none_opt
+                d3 = st.selectbox("🥉 3rd Choice (1 pt)", d3_opts, index=d3_opts.index(d3_def), key="d3")
             else:
                 st.info("Add dining ideas first.")
                 d1 = d2 = d3 = none_opt
