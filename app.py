@@ -525,19 +525,9 @@ with tab4:
     st.caption("Rank your top 3 picks for events and dining. You can update anytime.")
  
     try:
-        # Always read fresh so tally reflects latest votes immediately
-        _sh = get_sheet()
-        def _read_fresh(tab):
-            ws = _sh.worksheet(tab)
-            vals = ws.get_all_values()
-            if not vals or len(vals) < 2:
-                return pd.DataFrame()
-            hdrs = [h.strip() for h in vals[0]]
-            rows = [r + [""] * (len(hdrs) - len(r)) for r in vals[1:]]
-            return pd.DataFrame(rows, columns=hdrs)
-        events_df = _read_fresh("events")
-        dining_df = _read_fresh("dining")
-        votes_df  = _read_fresh("votes")
+        events_df = get_data("events")
+        dining_df = get_data("dining")
+        votes_df  = get_data("votes")
     except Exception as e:
         st.error(f"Could not load voting data: {e}")
         events_df = dining_df = votes_df = pd.DataFrame()
@@ -546,20 +536,7 @@ with tab4:
         if not _df.empty:
             _df.columns = [c.strip() for c in _df.columns]
  
-    # ── Deduplicate votes sheet — keep last row per person, delete extras ─────
-    if not votes_df.empty and "Name" in votes_df.columns:
-        dupes = votes_df[votes_df.duplicated(subset=["Name"], keep="last")]
-        if not dupes.empty:
-            # Delete duplicate rows from sheet (highest row index first to avoid shifting)
-            sh = get_sheet()
-            ws = sh.worksheet("votes")
-            for idx in sorted(dupes.index.tolist(), reverse=True):
-                ws.delete_rows(idx + 2)  # +2: header row + 1-based
-            refresh_data()
-            votes_df = get_data("votes")
-            if not votes_df.empty:
-                votes_df.columns = [c.strip() for c in votes_df.columns]
- 
+    
     def get_titles(df):
         for col in ["Title", "title"]:
             if not df.empty and col in df.columns:
@@ -610,19 +587,15 @@ with tab4:
     if not identified:
         st.info("Select your name in the sidebar to vote.")
     else:
-        # Always read votes fresh so banner and pre-fill are accurate
+        # Get existing vote from cache
+        existing_vote = None
         try:
-            sh = get_sheet()
-            ws_votes = sh.worksheet("votes")
-            votes_live = ws_votes.get_all_values()
-            existing_vote = None
-            if len(votes_live) > 1:
-                v_headers = [h.strip() for h in votes_live[0]]
-                for vrow in votes_live[1:]:
-                    if vrow and vrow[0].strip().lower() == user.lower():
-                        padded = vrow + [""] * (len(v_headers) - len(vrow))
-                        existing_vote = dict(zip(v_headers, padded))
-                        break
+            votes_cached = get_data("votes")
+            if not votes_cached.empty and "Name" in votes_cached.columns:
+                votes_cached.columns = [c.strip() for c in votes_cached.columns]
+                match = votes_cached[votes_cached["Name"].str.strip().str.lower() == user.lower()]
+                if not match.empty:
+                    existing_vote = match.iloc[0].to_dict()
         except Exception:
             existing_vote = None
  
@@ -678,21 +651,17 @@ with tab4:
             def clean(v): return "" if v == none_opt else v
             new_row = [user, clean(e1), clean(e2), clean(e3), clean(d1), clean(d2), clean(d3)]
             try:
-                # Always read fresh from sheet to get true current state
-                sh = get_sheet()
-                ws = sh.worksheet("votes")
-                all_vals = ws.get_all_values()
-                # Find any existing rows for this user (case-insensitive)
-                existing_rows = []
-                for i, r in enumerate(all_vals[1:], start=2):  # start=2: 1-based + skip header
-                    if r and r[0].strip().lower() == user.lower():
-                        existing_rows.append(i)
+                # Use cached data to find existing row — avoids extra API call
+                votes_cached = get_data("votes")
+                existing_row_idx = None
+                if not votes_cached.empty and "Name" in votes_cached.columns:
+                    for i, r in votes_cached.iterrows():
+                        if str(r.get("Name", "")).strip().lower() == user.lower():
+                            existing_row_idx = i + 2  # +2: 1-based + header row
+                            break
  
-                if existing_rows:
-                    # Update the first match, delete any extras (reverse to avoid index shift)
-                    update_row("votes", existing_rows[0], new_row)
-                    for extra_idx in sorted(existing_rows[1:], reverse=True):
-                        ws.delete_rows(extra_idx)
+                if existing_row_idx:
+                    update_row("votes", existing_row_idx, new_row)
                 else:
                     append_row("votes", new_row)
  
