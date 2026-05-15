@@ -506,8 +506,9 @@ renderGrid();
 def get_col(row, *candidates):
     """Try multiple column name variants, return first match or empty string."""
     for c in candidates:
-        if c in row and str(row[c]).strip() not in ("", "nan"):
-            return str(row[c]).strip()
+        val = row.get(c, "")
+        if str(val).strip() not in ("", "nan", "None"):
+            return str(val).strip()
     return ""
  
 def ideas_tab(tab, sheet_tab, label):
@@ -520,16 +521,8 @@ def ideas_tab(tab, sheet_tab, label):
             st.error(f"Could not load data: {e}")
             df = pd.DataFrame()
  
-        # Normalise column names — strip whitespace
         if not df.empty:
             df.columns = [c.strip() for c in df.columns]
- 
-        # Debug expander — shows raw sheet data so we can verify column names
-        with st.expander("🔍 Debug: raw sheet data (remove once working)"):
-            st.write("Columns:", list(df.columns) if not df.empty else "none")
-            st.write("Row count:", len(df))
-            if not df.empty:
-                st.dataframe(df)
  
         # Side-by-side layout: list on left, form on right
         col_list, col_form = st.columns([3, 2], gap="large")
