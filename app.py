@@ -39,8 +39,14 @@ def get_sheet():
 def read_sheet(tab):
     sh = get_sheet()
     ws = sh.worksheet(tab)
-    data = ws.get_all_records()
-    return pd.DataFrame(data) if data else pd.DataFrame()
+    all_values = ws.get_all_values()
+    if not all_values or len(all_values) < 2:
+        return pd.DataFrame()
+    headers = [h.strip() for h in all_values[0]]
+    rows = all_values[1:]
+    # Pad rows that are shorter than headers
+    padded = [r + [""] * (len(headers) - len(r)) for r in rows]
+    return pd.DataFrame(padded, columns=headers)
  
 def append_row(tab, row: list):
     sh = get_sheet()
@@ -514,9 +520,16 @@ def ideas_tab(tab, sheet_tab, label):
             st.error(f"Could not load data: {e}")
             df = pd.DataFrame()
  
-        # Normalise column names — strip whitespace, case-insensitive lookup
+        # Normalise column names — strip whitespace
         if not df.empty:
             df.columns = [c.strip() for c in df.columns]
+ 
+        # Debug expander — shows raw sheet data so we can verify column names
+        with st.expander("🔍 Debug: raw sheet data (remove once working)"):
+            st.write("Columns:", list(df.columns) if not df.empty else "none")
+            st.write("Row count:", len(df))
+            if not df.empty:
+                st.dataframe(df)
  
         # Side-by-side layout: list on left, form on right
         col_list, col_form = st.columns([3, 2], gap="large")
