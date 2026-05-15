@@ -264,12 +264,9 @@ with tab1:
         cal_state[day] = "✓" if cur == "" else ("✗" if cur == "✓" else "")
         st.session_state[ss_key] = cal_state
  
-    # CSS: hide the button text/border and stretch it to fill the cell
-    # The markdown div sits behind; button is transparent overlay on top
     st.markdown("""
     <style>
-    /* Calendar header */
-    .cal-hdr{background:#fff;border-radius:16px 16px 0 0;border:1px solid #e0e0e0;
+    .cal-hdr{background:#fff;border-radius:12px 12px 0 0;border:1px solid #e0e0e0;
              border-bottom:none;padding:16px 20px 10px;display:flex;align-items:center;gap:12px}
     .cal-title-txt{font-family:sans-serif;font-size:18px;font-weight:500;color:#3c4043}
     .cal-legend{display:flex;gap:14px;margin-left:auto;align-items:center}
@@ -277,36 +274,10 @@ with tab1:
     .leg-dot{width:10px;height:10px;border-radius:50%}
     .lg{background:#34a853}.lr{background:#ea4335}.lgr{background:#e0e0e0;border:1px solid #ccc}
     .dow-hdr{display:grid;grid-template-columns:repeat(7,1fr);
-             border:1px solid #e0e0e0;border-top:none;border-bottom:none;background:#f8f9fa}
+             border:1px solid #e0e0e0;border-top:none;background:#f8f9fa;margin-bottom:0}
     .dow-cell{text-align:center;padding:7px 0;font-size:10px;font-weight:600;
               text-transform:uppercase;letter-spacing:.08em;color:#70757a}
- 
-    /* Make Streamlit columns tight */
-    div[data-testid="stHorizontalBlock"]{gap:0px !important}
-    div[data-testid="stHorizontalBlock"] > div{padding:0 !important}
- 
-    /* Cell container: position relative so button can overlay */
-    .cal-cell-wrap{position:relative;min-height:110px}
- 
-    /* The invisible button stretches over the whole cell */
-    .cal-cell-wrap button[kind="secondary"]{
-        position:absolute !important;
-        top:0 !important; left:0 !important;
-        width:100% !important; height:100% !important;
-        background:transparent !important;
-        border:none !important;
-        color:transparent !important;
-        box-shadow:none !important;
-        cursor:pointer !important;
-        z-index:10;
-        padding:0 !important;
-        min-height:unset !important;
-    }
-    .cal-cell-wrap button[kind="secondary"]:hover{
-        background:rgba(0,0,0,0.04) !important;
-    }
     </style>
- 
     <div class="cal-hdr">
       <span class="cal-title-txt">📅 June 2026</span>
       <div class="cal-legend">
@@ -326,17 +297,51 @@ with tab1:
  
     rows_of_7 = [grid[i:i+7] for i in range(0, len(grid), 7)]
  
+    # Inject CSS to make buttons look like calendar cells
+    st.markdown("""
+    <style>
+    /* Remove all default button styling for calendar buttons */
+    [data-testid="stHorizontalBlock"] button {
+        background: white !important;
+        border: 1px solid #e8eaed !important;
+        border-radius: 4px !important;
+        padding: 6px 4px !important;
+        min-height: 110px !important;
+        width: 100% !important;
+        text-align: left !important;
+        font-size: 11px !important;
+        color: #3c4043 !important;
+        box-shadow: none !important;
+        cursor: pointer !important;
+        line-height: 1.4 !important;
+        white-space: pre-wrap !important;
+        display: block !important;
+    }
+    [data-testid="stHorizontalBlock"] button:hover {
+        background: #f1f3f4 !important;
+        border-color: #dadce0 !important;
+    }
+    [data-testid="stHorizontalBlock"] div[data-testid="stColumn"] {
+        padding: 0 1px !important;
+    }
+    [data-testid="stHorizontalBlock"] {
+        gap: 0 !important;
+        border: 1px solid #e0e0e0;
+        border-top: none;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+ 
     for week_row in rows_of_7:
         cols = st.columns(7, gap="small")
         for ci, cell in enumerate(week_row):
             with cols[ci]:
                 if cell is None or cell.weekday() >= 5:
-                    # Empty padding or weekend
                     day_label = str(cell.day) if cell else ""
                     st.markdown(
                         f"<div style='min-height:110px;background:#fafafa;"
                         f"border:1px solid #eee;padding:6px 4px;"
-                        f"color:#ccc;font-size:11px'>{day_label}</div>",
+                        f"color:#ccc;font-size:11px;border-radius:4px'>{day_label}</div>",
                         unsafe_allow_html=True)
                 else:
                     ds = cell.strftime("%a %b %d")
@@ -344,42 +349,56 @@ with tab1:
  
                     if s == "✓":
                         bg = "#e6f4ea"; num_bg = "#34a853"; num_col = "#fff"; bdr = "#34a853"
+                        hover_bg = "#ceead6"
                     elif s == "✗":
                         bg = "#fce8e6"; num_bg = "#ea4335"; num_col = "#fff"; bdr = "#ea4335"
+                        hover_bg = "#f5c6c3"
                     else:
                         bg = "#fff"; num_bg = "transparent"; num_col = "#3c4043"; bdr = "#e8eaed"
+                        hover_bg = "#f1f3f4"
  
-                    # Name chips
-                    chips = ""
+                    # Name chips as plain text lines (works inside button label)
+                    chip_lines = ""
                     if identified:
                         if s == "✓":
-                            chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#34a853;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                            chip_lines += f"\n🟢 {user}"
                         elif s == "✗":
-                            chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#ea4335;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                            chip_lines += f"\n🔴 {user}"
                     for n in day_avail_names.get(ds, []):
                         if n != user:
-                            chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#34a85320;color:#1a7a38;border:1px solid #34a85340;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                            chip_lines += f"\n· {n}"
                     for n in day_unavail_names.get(ds, []):
                         if n != user:
-                            chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#ea433520;color:#b71c1c;border:1px solid #ea433540;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                            chip_lines += f"\n✕ {n}"
  
-                    # Wrap in relative div so button can overlay
-                    st.markdown(
-                        f"<div class='cal-cell-wrap'>"
-                        f"<div style='background:{bg};border:1px solid {bdr};"
-                        f"border-radius:4px;padding:5px 4px;min-height:110px;pointer-events:none'>"
-                        f"<span style='display:inline-flex;align-items:center;justify-content:center;"
-                        f"width:22px;height:22px;border-radius:50%;background:{num_bg};"
-                        f"color:{num_col};font-size:11px;font-weight:600;margin-bottom:3px'>"
-                        f"{cell.day}</span>"
-                        f"<div>{chips}</div>"
-                        f"</div>",
-                        unsafe_allow_html=True)
+                    btn_label = f"{cell.day}{chip_lines}"
+ 
+                    # Inject per-cell style using a unique class
+                    cell_id = f"cal_{ds.replace(' ', '_')}"
+                    st.markdown(f"""
+                    <style>
+                    #{cell_id} button {{
+                        background: {bg} !important;
+                        border-color: {bdr} !important;
+                    }}
+                    #{cell_id} button:hover {{
+                        background: {hover_bg} !important;
+                    }}
+                    </style>
+                    <div id="{cell_id}">
+                    """, unsafe_allow_html=True)
  
                     if identified:
-                        if st.button(" ", key=f"btn_{ds}", use_container_width=True):
+                        if st.button(btn_label, key=f"btn_{ds}", use_container_width=True):
                             cycle_day(ds)
                             st.rerun()
+                    else:
+                        st.markdown(
+                            f"<div style='background:{bg};border:1px solid {bdr};"
+                            f"border-radius:4px;padding:6px 4px;min-height:110px;"
+                            f"font-size:11px;color:#3c4043'>"
+                            f"<strong>{cell.day}</strong>{chip_lines.replace(chr(10), '<br>')}</div>",
+                            unsafe_allow_html=True)
  
                     st.markdown("</div>", unsafe_allow_html=True)
  
