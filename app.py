@@ -36,6 +36,7 @@ def get_sheet():
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
  
+@st.cache_data(ttl=60)
 def read_sheet(tab):
     sh = get_sheet()
     ws = sh.worksheet(tab)
@@ -44,7 +45,6 @@ def read_sheet(tab):
         return pd.DataFrame()
     headers = [h.strip() for h in all_values[0]]
     rows = all_values[1:]
-    # Pad rows that are shorter than headers
     padded = [r + [""] * (len(headers) - len(r)) for r in rows]
     return pd.DataFrame(padded, columns=headers)
  
@@ -473,46 +473,46 @@ renderGrid();
 </html>
 """
  
-    # Render the calendar component
+    # ── Render calendar and handle single-button save ────────────────────────
+    # Pass saved_state into JS; JS writes selections back via query params on the
+    # internal Save button, then the ONE Streamlit button below reads & commits.
     components.html(calendar_html, height=780, scrolling=False)
- 
-    # ── Read state from query params set by the calendar JS ─────────────────
-    qp = st.query_params
-    cal_save_triggered = qp.get("cal_save") == "1" and qp.get("cal_user") == user
- 
-    # Build state from query params if available, otherwise fall back to sheet data
-    if cal_save_triggered:
-        avail_raw = qp.get("cal_avail", "")
-        unavail_raw = qp.get("cal_unavail", "")
-        avail_days   = set(avail_raw.split("|")) if avail_raw else set()
-        unavail_days = set(unavail_raw.split("|")) if unavail_raw else set()
-        current_state = {}
-        for d in JUNE_DAYS:
-            if d in avail_days:     current_state[d] = "✓"
-            elif d in unavail_days: current_state[d] = "✗"
-            else:                   current_state[d] = saved_state.get(d, "")
-    else:
-        current_state = saved_state
  
     if identified:
         st.markdown("")
-        if st.button("💾 Confirm & Save to Google Sheets", type="primary"):
+        qp = st.query_params
+        cal_save_triggered = qp.get("cal_save") == "1" and qp.get("cal_user") == user
+ 
+        if cal_save_triggered:
+            avail_raw   = qp.get("cal_avail", "")
+            unavail_raw = qp.get("cal_unavail", "")
+            avail_days   = set(avail_raw.split("|"))   if avail_raw   else set()
+            unavail_days = set(unavail_raw.split("|")) if unavail_raw else set()
+            current_state = {}
+            for d in JUNE_DAYS:
+                if d in avail_days:     current_state[d] = "✓"
+                elif d in unavail_days: current_state[d] = "✗"
+                else:                   current_state[d] = saved_state.get(d, "")
+        else:
+            current_state = saved_state
+ 
+        # Rename the internal JS button label to make clear it triggers Streamlit
+        st.caption("👆 After clicking **Save Availability** in the calendar, your selections are recorded. The calendar Save button handles everything — no second step needed.")
+ 
+        # Auto-save when JS button has been clicked (query param set)
+        if cal_save_triggered:
             row = [user] + [current_state.get(d, "") for d in JUNE_DAYS]
             try:
                 if existing_idx:
                     update_row("availability", existing_idx, row)
                 else:
                     append_row("availability", row)
-                # Clear query params after saving
+                read_sheet.clear()
                 st.query_params.clear()
-                st.success("✅ Availability saved to Google Sheets!")
+                st.success("✅ Availability saved!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving: {e}")
-        if cal_save_triggered:
-            st.info("📋 Calendar selections loaded — click **Confirm & Save** to write to Google Sheets.")
-        else:
-            st.caption("👆 Click dates in the calendar above, then click this button to save.")
  
     # ── Team overview heatmap below ──────────────────────────────────────────
     if not avail_df.empty:
@@ -594,6 +594,7 @@ def ideas_tab(tab, sheet_tab, label):
                         else:
                             try:
                                 append_row(sheet_tab, [user, title.strip(), desc.strip(), link.strip(), price.strip()])
+                                read_sheet.clear()
                                 st.success(f"✅ {label} idea submitted!")
                                 st.rerun()
                             except Exception as e:
@@ -720,6 +721,7 @@ with tab4:
                     update_row("votes", existing_vote_idx, row)
                 else:
                     append_row("votes", row)
+                read_sheet.clear()
                 st.success("Votes saved!")
                 st.rerun()
             except Exception as e:
