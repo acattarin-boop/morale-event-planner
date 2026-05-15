@@ -522,6 +522,20 @@ with tab4:
         if not _df.empty:
             _df.columns = [c.strip() for c in _df.columns]
  
+    # ── Deduplicate votes sheet — keep last row per person, delete extras ─────
+    if not votes_df.empty and "Name" in votes_df.columns:
+        dupes = votes_df[votes_df.duplicated(subset=["Name"], keep="last")]
+        if not dupes.empty:
+            # Delete duplicate rows from sheet (highest row index first to avoid shifting)
+            sh = get_sheet()
+            ws = sh.worksheet("votes")
+            for idx in sorted(dupes.index.tolist(), reverse=True):
+                ws.delete_rows(idx + 2)  # +2: header row + 1-based
+            refresh_data()
+            votes_df = get_data("votes")
+            if not votes_df.empty:
+                votes_df.columns = [c.strip() for c in votes_df.columns]
+ 
     def get_titles(df):
         for col in ["Title", "title"]:
             if not df.empty and col in df.columns:
@@ -575,16 +589,17 @@ with tab4:
         existing_vote     = None
         existing_vote_idx = None
         if not votes_df.empty and "Name" in votes_df.columns:
-            match = votes_df[votes_df["Name"] == user]
+            votes_df["Name"] = votes_df["Name"].str.strip()
+            match = votes_df[votes_df["Name"].str.lower() == user.lower()]
             if not match.empty:
-                existing_vote     = match.iloc[0]
-                existing_vote_idx = int(match.index[0]) + 2
+                existing_vote     = match.iloc[-1]  # always use last row
+                existing_vote_idx = int(match.index[-1]) + 2
  
         st.markdown(f"#### {user}'s Votes")
         none_opt = "— no pick —"
  
         if existing_vote is not None:
-            st.info("You've already voted. Making new selections will **overwrite** your previous vote.")
+            st.info(f"You've already voted. Your current selections are pre-filled below. Saving will overwrite your previous vote.")
  
         col1, col2 = st.columns(2)
  
@@ -642,3 +657,4 @@ with tab4:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving votes: {e}")
+ 
