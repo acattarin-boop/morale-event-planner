@@ -586,20 +586,27 @@ with tab4:
     if not identified:
         st.info("Select your name in the sidebar to vote.")
     else:
-        existing_vote     = None
-        existing_vote_idx = None
-        if not votes_df.empty and "Name" in votes_df.columns:
-            votes_df["Name"] = votes_df["Name"].str.strip()
-            match = votes_df[votes_df["Name"].str.lower() == user.lower()]
-            if not match.empty:
-                existing_vote     = match.iloc[-1]  # always use last row
-                existing_vote_idx = int(match.index[-1]) + 2
+        # Always read votes fresh so banner and pre-fill are accurate
+        try:
+            sh = get_sheet()
+            ws_votes = sh.worksheet("votes")
+            votes_live = ws_votes.get_all_values()
+            existing_vote = None
+            if len(votes_live) > 1:
+                v_headers = [h.strip() for h in votes_live[0]]
+                for vrow in votes_live[1:]:
+                    if vrow and vrow[0].strip().lower() == user.lower():
+                        padded = vrow + [""] * (len(v_headers) - len(vrow))
+                        existing_vote = dict(zip(v_headers, padded))
+                        break
+        except Exception:
+            existing_vote = None
  
         st.markdown(f"#### {user}'s Votes")
         none_opt = "— no pick —"
  
         if existing_vote is not None:
-            st.info(f"You've already voted. Your current selections are pre-filled below. Saving will overwrite your previous vote.")
+            st.info("You've already voted — your selections are pre-filled. Saving will overwrite your previous vote.")
  
         col1, col2 = st.columns(2)
  
@@ -607,17 +614,16 @@ with tab4:
             st.markdown("**🎯 Event Rankings**")
             if event_titles:
                 e_opts = [none_opt] + event_titles
-                def ei(key):
-                    v = str(existing_vote.get(key, none_opt)).strip() if existing_vote is not None else none_opt
+                def ev(key):
+                    v = existing_vote.get(key, none_opt).strip() if existing_vote else none_opt
                     return e_opts.index(v) if v in e_opts else 0
-                e1 = st.selectbox("🥇 1st Choice (3 pts)", e_opts, index=ei("Event 1st"), key="e1")
-                # Filter out already-picked options for 2nd and 3rd
+                e1 = st.selectbox("🥇 1st Choice (3 pts)", e_opts, index=ev("Event 1st"), key="e1")
                 e2_opts = [o for o in e_opts if o == none_opt or o != e1]
-                e2_def = str(existing_vote.get("Event 2nd", none_opt)).strip() if existing_vote is not None else none_opt
+                e2_def = (existing_vote.get("Event 2nd", none_opt).strip() if existing_vote else none_opt)
                 e2_def = e2_def if e2_def in e2_opts else none_opt
                 e2 = st.selectbox("🥈 2nd Choice (2 pts)", e2_opts, index=e2_opts.index(e2_def), key="e2")
                 e3_opts = [o for o in e_opts if o == none_opt or (o != e1 and o != e2)]
-                e3_def = str(existing_vote.get("Event 3rd", none_opt)).strip() if existing_vote is not None else none_opt
+                e3_def = (existing_vote.get("Event 3rd", none_opt).strip() if existing_vote else none_opt)
                 e3_def = e3_def if e3_def in e3_opts else none_opt
                 e3 = st.selectbox("🥉 3rd Choice (1 pt)", e3_opts, index=e3_opts.index(e3_def), key="e3")
             else:
@@ -628,16 +634,16 @@ with tab4:
             st.markdown("**🍽️ Dining Rankings**")
             if dining_titles:
                 d_opts = [none_opt] + dining_titles
-                def di(key):
-                    v = str(existing_vote.get(key, none_opt)).strip() if existing_vote is not None else none_opt
+                def dv(key):
+                    v = existing_vote.get(key, none_opt).strip() if existing_vote else none_opt
                     return d_opts.index(v) if v in d_opts else 0
-                d1 = st.selectbox("🥇 1st Choice (3 pts)", d_opts, index=di("Dining 1st"), key="d1")
+                d1 = st.selectbox("🥇 1st Choice (3 pts)", d_opts, index=dv("Dining 1st"), key="d1")
                 d2_opts = [o for o in d_opts if o == none_opt or o != d1]
-                d2_def = str(existing_vote.get("Dining 2nd", none_opt)).strip() if existing_vote is not None else none_opt
+                d2_def = (existing_vote.get("Dining 2nd", none_opt).strip() if existing_vote else none_opt)
                 d2_def = d2_def if d2_def in d2_opts else none_opt
                 d2 = st.selectbox("🥈 2nd Choice (2 pts)", d2_opts, index=d2_opts.index(d2_def), key="d2")
                 d3_opts = [o for o in d_opts if o == none_opt or (o != d1 and o != d2)]
-                d3_def = str(existing_vote.get("Dining 3rd", none_opt)).strip() if existing_vote is not None else none_opt
+                d3_def = (existing_vote.get("Dining 3rd", none_opt).strip() if existing_vote else none_opt)
                 d3_def = d3_def if d3_def in d3_opts else none_opt
                 d3 = st.selectbox("🥉 3rd Choice (1 pt)", d3_opts, index=d3_opts.index(d3_def), key="d3")
             else:
@@ -646,15 +652,28 @@ with tab4:
  
         if st.button("💾 Save Votes", type="primary"):
             def clean(v): return "" if v == none_opt else v
-            row = [user, clean(e1), clean(e2), clean(e3), clean(d1), clean(d2), clean(d3)]
+            new_row = [user, clean(e1), clean(e2), clean(e3), clean(d1), clean(d2), clean(d3)]
             try:
-                if existing_vote_idx:
-                    update_row("votes", existing_vote_idx, row)
+                # Always read fresh from sheet to get true current state
+                sh = get_sheet()
+                ws = sh.worksheet("votes")
+                all_vals = ws.get_all_values()
+                # Find any existing rows for this user (case-insensitive)
+                existing_rows = []
+                for i, r in enumerate(all_vals[1:], start=2):  # start=2: 1-based + skip header
+                    if r and r[0].strip().lower() == user.lower():
+                        existing_rows.append(i)
+ 
+                if existing_rows:
+                    # Update the first match, delete any extras (reverse to avoid index shift)
+                    update_row("votes", existing_rows[0], new_row)
+                    for extra_idx in sorted(existing_rows[1:], reverse=True):
+                        ws.delete_rows(extra_idx)
                 else:
-                    append_row("votes", row)
+                    append_row("votes", new_row)
+ 
                 refresh_data()
                 st.success("✅ Votes saved!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving votes: {e}")
- 
