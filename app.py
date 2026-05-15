@@ -14,13 +14,15 @@ BASE_NAMES = [
 ]
  
 def get_event_weekdays():
-    """Return all weekdays in May and June 2026."""
+    """Return all weekdays in May and June 2026.
+    Format matches Google Sheet headers: 'Fri May 1', 'Mon June 1' (no leading zero, full month name).
+    """
     days = []
     for month in [5, 6]:
         d = date(2026, month, 1)
         while d.month == month:
             if d.weekday() < 5:
-                days.append(d.strftime("%a %b %d"))
+                days.append(d.strftime("%a %B %-d"))
             d += timedelta(days=1)
     return days
  
