@@ -497,6 +497,13 @@ renderGrid();
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 · EVENTS
 # ══════════════════════════════════════════════════════════════════════════════
+def get_col(row, *candidates):
+    """Try multiple column name variants, return first match or empty string."""
+    for c in candidates:
+        if c in row and str(row[c]).strip() not in ("", "nan"):
+            return str(row[c]).strip()
+    return ""
+ 
 def ideas_tab(tab, sheet_tab, label):
     with tab:
         st.subheader(f"{label} Ideas")
@@ -507,43 +514,57 @@ def ideas_tab(tab, sheet_tab, label):
             st.error(f"Could not load data: {e}")
             df = pd.DataFrame()
  
-        # Show existing ideas
+        # Normalise column names — strip whitespace, case-insensitive lookup
         if not df.empty:
-            st.markdown(f"#### Current {label} Suggestions")
-            for i, row in df.iterrows():
-                with st.container(border=True):
-                    c1, c2, c3 = st.columns([3, 2, 1])
-                    c1.markdown(f"**{row.get('Title','—')}**  \n*Suggested by {row.get('Submitted By','—')}*")
-                    link = row.get("Link", "")
-                    if link and str(link).startswith("http"):
-                        c2.markdown(f"[🔗 More Info]({link})")
-                    price = row.get("Est. Price/Person", "")
-                    if price:
-                        c3.markdown(f"💰 **${price}**")
-        else:
-            st.info(f"No {label.lower()} ideas yet — be the first to add one!")
+            df.columns = [c.strip() for c in df.columns]
  
-        st.divider()
+        # Side-by-side layout: list on left, form on right
+        col_list, col_form = st.columns([3, 2], gap="large")
  
-        if not identified:
-            st.info("Select your name in the sidebar to submit an idea.")
-        else:
+        with col_list:
+            st.markdown(f"#### 📋 Current {label} Suggestions")
+            if df.empty or len(df) == 0:
+                st.info(f"No {label.lower()} ideas yet — be the first to add one!")
+            else:
+                for i, row in df.iterrows():
+                    title_val = get_col(row, "Title", "title", "TITLE")
+                    by_val    = get_col(row, "Submitted By", "submitted by", "submitted_by", "Name")
+                    link_val  = get_col(row, "Link", "link", "LINK", "Website", "URL")
+                    price_val = get_col(row, "Est. Price/Person", "Est. Price", "Price", "price", "est. price/person")
+ 
+                    with st.container(border=True):
+                        # Title + submitter
+                        title_display = title_val if title_val else "Untitled"
+                        by_display    = by_val    if by_val    else "Unknown"
+                        st.markdown(f"**{title_display}**")
+                        st.caption(f"Suggested by {by_display}")
+                        # Link + price on same row
+                        meta_cols = st.columns([2, 1])
+                        if link_val and link_val.startswith("http"):
+                            meta_cols[0].markdown(f"[🔗 More Info]({link_val})")
+                        if price_val:
+                            meta_cols[1].markdown(f"💰 **${price_val}/pp**")
+ 
+        with col_form:
             st.markdown(f"#### ➕ Add a {label} Idea")
-            with st.form(key=f"form_{sheet_tab}"):
-                title = st.text_input("Title *", placeholder=f"e.g. Bowling Night")
-                link  = st.text_input("Website / Link (optional)", placeholder="https://...")
-                price = st.text_input("Estimated Price Per Person (optional)", placeholder="e.g. 25")
-                submitted = st.form_submit_button("Submit Idea", type="primary")
-                if submitted:
-                    if not title:
-                        st.warning("Please enter a title.")
-                    else:
-                        try:
-                            append_row(sheet_tab, [user, title, link, price])
-                            st.success(f"{label} idea submitted!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error saving: {e}")
+            if not identified:
+                st.info("Select your name in the sidebar to submit.")
+            else:
+                with st.form(key=f"form_{sheet_tab}", clear_on_submit=True):
+                    title = st.text_input("Title *", placeholder="e.g. Bowling Night")
+                    link  = st.text_input("Link (optional)", placeholder="https://...")
+                    price = st.text_input("Est. Price/Person (optional)", placeholder="e.g. 25")
+                    submitted = st.form_submit_button("Submit Idea", type="primary", use_container_width=True)
+                    if submitted:
+                        if not title.strip():
+                            st.warning("Please enter a title.")
+                        else:
+                            try:
+                                append_row(sheet_tab, [user, title.strip(), link.strip(), price.strip()])
+                                st.success(f"✅ {label} idea submitted!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error saving: {e}")
  
 ideas_tab(tab2, "events", "Event")
 ideas_tab(tab3, "dining", "Dining")
@@ -563,8 +584,19 @@ with tab4:
         st.error(f"Could not load voting data: {e}")
         events_df = dining_df = votes_df = pd.DataFrame()
  
-    event_titles  = list(events_df["Title"]) if not events_df.empty and "Title" in events_df.columns else []
-    dining_titles = list(dining_df["Title"]) if not dining_df.empty and "Title" in dining_df.columns else []
+    # Normalise column names
+    for _df in [events_df, dining_df, votes_df]:
+        if not _df.empty:
+            _df.columns = [c.strip() for c in _df.columns]
+ 
+    def get_titles(df):
+        for col in ["Title", "title", "TITLE"]:
+            if not df.empty and col in df.columns:
+                return [str(v).strip() for v in df[col] if str(v).strip() not in ("", "nan")]
+        return []
+ 
+    event_titles  = get_titles(events_df)
+    dining_titles = get_titles(dining_df)
  
     # Tally votes
     def tally(df, col_prefix, titles):
