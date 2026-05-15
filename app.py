@@ -1,18 +1,21 @@
+
+Copy
+
 import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, timedelta
 import json
-
+ 
 # ── Config ──────────────────────────────────────────────────────────────────
 SHEET_ID = "18-q7ItMDfPkdvS7o01UzS4Xbyz6KmDDaTjcBTksoBlU"
-
+ 
 NAMES = [
     "Ahmed", "Alec", "Brian", "Dave", "Farhad",
     "Kyle", "Leo", "Meng", "Peter", "Ranga", "Sesha", "Vivian"
 ]
-
+ 
 # Generate all weekdays in June 2025
 def get_june_weekdays():
     days = []
@@ -22,9 +25,9 @@ def get_june_weekdays():
             days.append(d.strftime("%a %b %d"))
         d += timedelta(days=1)
     return days
-
+ 
 JUNE_DAYS = get_june_weekdays()
-
+ 
 # ── Google Sheets connection ─────────────────────────────────────────────────
 def get_sheet():
     creds_dict = json.loads(st.secrets["gcp_service_account"])
@@ -35,29 +38,29 @@ def get_sheet():
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
     return client.open_by_key(SHEET_ID)
-
+ 
 def read_sheet(tab):
     sh = get_sheet()
     ws = sh.worksheet(tab)
     data = ws.get_all_records()
     return pd.DataFrame(data) if data else pd.DataFrame()
-
+ 
 def append_row(tab, row: list):
     sh = get_sheet()
     ws = sh.worksheet(tab)
     ws.append_row(row, value_input_option="USER_ENTERED")
-
+ 
 def update_row(tab, row_index: int, row: list):
     """row_index is 1-based sheet row (header=1, data starts at 2)"""
     sh = get_sheet()
     ws = sh.worksheet(tab)
     ws.update(f"A{row_index}:{chr(64+len(row))}{row_index}", [row])
-
+ 
 def delete_row(tab, row_index: int):
     sh = get_sheet()
     ws = sh.worksheet(tab)
     ws.delete_rows(row_index)
-
+ 
 def ensure_headers():
     sh = get_sheet()
     headers = {
@@ -73,14 +76,14 @@ def ensure_headers():
         if existing != hdrs:
             ws.clear()
             ws.append_row(hdrs)
-
+ 
 # ── Streamlit UI ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Morale Event Planner", page_icon="🎉", layout="wide")
-
+ 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
-
+ 
 html, body, [class*="css"] {
     font-family: 'DM Sans', sans-serif;
 }
@@ -107,10 +110,10 @@ div[data-testid="stCheckbox"] label { font-size: 0.85rem; }
 }
 </style>
 """, unsafe_allow_html=True)
-
+ 
 st.title("🎉 Morale Event Planner")
 st.caption("Coordinate availability, propose ideas, and vote — all in one place.")
-
+ 
 # ── Name selector (persisted in session) ────────────────────────────────────
 with st.sidebar:
     st.markdown("### 👋 Who are you?")
@@ -121,95 +124,193 @@ with st.sidebar:
         st.warning("Please select your name to participate.")
     st.divider()
     st.caption("Morale Event Planner · June 2025")
-
+ 
 identified = user != "— select —"
-
+ 
 # ── Tabs ────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4 = st.tabs(["📅 Availability", "🎯 Events", "🍽️ Dining", "🗳️ Votes"])
-
+ 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 · AVAILABILITY
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
     st.subheader("When are you available in June?")
-    st.caption("Check every day that works for you. Your selections save automatically.")
-
+    st.caption("Click a date to mark it **green** (available) or **red** (not available). Click again to clear it.")
+ 
     try:
         avail_df = read_sheet("availability")
     except Exception as e:
         st.error(f"Could not load availability data: {e}")
         avail_df = pd.DataFrame()
-
-    # Show summary grid (all users)
-    if not avail_df.empty:
-        st.markdown("#### Team Availability Overview")
-        display_df = avail_df.set_index("Name") if "Name" in avail_df.columns else avail_df
-        # Replace 1/0 or TRUE/FALSE with emoji
-        def fmt(val):
-            if str(val).upper() in ("TRUE", "1", "YES", "✓"):
-                return "✅"
-            return ""
-        styled = display_df.applymap(fmt)
-        st.dataframe(styled, use_container_width=True)
-
+ 
+    # ── Build team heatmap data ──────────────────────────────────────────────
+    if not avail_df.empty and "Name" in avail_df.columns:
+        st.markdown("#### 👥 Team Availability Overview")
+        # Count how many people are available each day
+        day_counts = {}
+        for day in JUNE_DAYS:
+            if day in avail_df.columns:
+                count = avail_df[day].apply(lambda v: 1 if str(v).strip() == "✓" else 0).sum()
+                day_counts[day] = count
+            else:
+                day_counts[day] = 0
+ 
+        # Build calendar HTML for team overview
+        weeks_overview = {}
+        for day_str in JUNE_DAYS:
+            d = pd.to_datetime(day_str, format="%a %b %d")
+            wk = d.isocalendar()[1]
+            weeks_overview.setdefault(wk, []).append((day_str, d))
+ 
+        overview_html = """
+        <style>
+        .cal-grid { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 1rem; }
+        .cal-week { display: flex; gap: 6px; }
+        .cal-day-ov {
+            width: 70px; height: 64px; border-radius: 10px;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; font-family: 'DM Sans', sans-serif;
+            border: 1px solid #e0e0e0; font-size: 0.75rem; color: #333;
+        }
+        .cal-day-ov .dow { font-size: 0.65rem; text-transform: uppercase;
+            letter-spacing: 0.05em; color: #999; margin-bottom: 2px; }
+        .cal-day-ov .num { font-size: 1rem; font-weight: 600; }
+        .cal-day-ov .cnt { font-size: 0.7rem; margin-top: 2px; }
+        .heat-0  { background: #f5f5f5; }
+        .heat-low  { background: #ffe0d0; }
+        .heat-mid  { background: #ffa07a; color: white; }
+        .heat-high { background: #e85d26; color: white; }
+        </style>
+        <div class='cal-grid'>
+        """
+        total_users = len(avail_df)
+        for wk, days in weeks_overview.items():
+            overview_html += "<div class='cal-week'>"
+            for day_str, d in days:
+                cnt = day_counts.get(day_str, 0)
+                ratio = cnt / total_users if total_users > 0 else 0
+                if ratio == 0:       heat = "heat-0"
+                elif ratio < 0.4:    heat = "heat-low"
+                elif ratio < 0.7:    heat = "heat-mid"
+                else:                heat = "heat-high"
+                overview_html += f"""
+                <div class='cal-day-ov {heat}'>
+                    <span class='dow'>{d.strftime('%a')}</span>
+                    <span class='num'>{d.day}</span>
+                    <span class='cnt'>{cnt}/{total_users}</span>
+                </div>"""
+            overview_html += "</div>"
+        overview_html += "</div>"
+        st.markdown(overview_html, unsafe_allow_html=True)
+ 
     st.divider()
-
+ 
     if not identified:
         st.info("Select your name in the sidebar to mark your availability.")
     else:
-        st.markdown(f"#### {user}'s Availability")
-
-        # Pre-fill existing selections
+        st.markdown(f"#### 📅 {user}'s Calendar — June 2025")
+        st.caption("🟢 = Available &nbsp;&nbsp; 🔴 = Not available &nbsp;&nbsp; ⬜ = No response")
+ 
+        # Load existing selections for this user
         existing_row = None
         existing_idx = None
         if not avail_df.empty and "Name" in avail_df.columns:
             match = avail_df[avail_df["Name"] == user]
             if not match.empty:
                 existing_row = match.iloc[0]
-                existing_idx = match.index[0] + 2  # +2 for header row + 1-based
-
-        # Build week-grouped checkboxes
-        weeks = {}
+                existing_idx = match.index[0] + 2
+ 
+        # Build initial state dict: day -> "✓" | "✗" | ""
+        if "cal_state" not in st.session_state or st.session_state.get("cal_user") != user:
+            init = {}
+            for day in JUNE_DAYS:
+                val = ""
+                if existing_row is not None and day in existing_row:
+                    v = str(existing_row[day]).strip()
+                    if v in ("✓", "✗"):
+                        val = v
+                init[day] = val
+            st.session_state["cal_state"] = init
+            st.session_state["cal_user"] = user
+ 
+        # Cycle: "" -> "✓" -> "✗" -> ""
+        def cycle(current):
+            return {"": "✓", "✓": "✗", "✗": ""}[current]
+ 
+        # Render interactive calendar with buttons
+        weeks_cal = {}
         for day_str in JUNE_DAYS:
             d = pd.to_datetime(day_str, format="%a %b %d")
-            week_num = d.isocalendar()[1]
-            weeks.setdefault(week_num, []).append(day_str)
-
-        selections = {}
-        for wk, days in weeks.items():
-            cols = st.columns(len(days))
-            for col, day in zip(cols, days):
-                default = False
-                if existing_row is not None and day in existing_row:
-                    val = str(existing_row[day]).upper()
-                    default = val in ("TRUE", "1", "YES", "✓")
-                selections[day] = col.checkbox(day, value=default, key=f"avail_{user}_{day}")
-
-        if st.button("💾 Save Availability", type="primary"):
-            row = [user] + [("✓" if selections[d] else "") for d in JUNE_DAYS]
-            try:
-                if existing_idx:
-                    update_row("availability", existing_idx, row)
+            wk = d.isocalendar()[1]
+            weeks_cal.setdefault(wk, []).append((day_str, d))
+ 
+        # CSS for calendar buttons
+        st.markdown("""
+        <style>
+        div[data-testid="stHorizontalBlock"] > div { gap: 6px !important; }
+        .cal-header { display: flex; gap: 6px; margin-bottom: 4px; }
+        .cal-dh { width: 72px; text-align: center; font-size: 0.7rem;
+                  text-transform: uppercase; letter-spacing: 0.05em; color: #999; }
+        </style>
+        """, unsafe_allow_html=True)
+ 
+        # Day-of-week header
+        st.markdown(
+            "<div class='cal-header'>"
+            + "".join(f"<div class='cal-dh'>{d}</div>" for d in ["Mon","Tue","Wed","Thu","Fri"])
+            + "</div>",
+            unsafe_allow_html=True
+        )
+ 
+        for wk, days in weeks_cal.items():
+            cols = st.columns(5)
+            for i, (day_str, d) in enumerate(days):
+                state = st.session_state["cal_state"].get(day_str, "")
+                if state == "✓":
+                    label = f"✅ {d.day}"
+                    btn_style = "background:#d4edda;"
+                elif state == "✗":
+                    label = f"❌ {d.day}"
+                    btn_style = "background:#f8d7da;"
                 else:
-                    append_row("availability", row)
-                st.success("Availability saved!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error saving: {e}")
-
+                    label = f"⬜ {d.day}"
+                    btn_style = ""
+ 
+                if cols[i].button(label, key=f"cal_{user}_{day_str}", use_container_width=True):
+                    st.session_state["cal_state"][day_str] = cycle(state)
+                    st.rerun()
+ 
+        st.markdown("<br>", unsafe_allow_html=True)
+ 
+        col_save, col_legend = st.columns([1, 3])
+        with col_save:
+            if st.button("💾 Save Availability", type="primary", use_container_width=True):
+                row = [user] + [st.session_state["cal_state"].get(d, "") for d in JUNE_DAYS]
+                try:
+                    if existing_idx:
+                        update_row("availability", existing_idx, row)
+                    else:
+                        append_row("availability", row)
+                    st.success("✅ Availability saved!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving: {e}")
+        with col_legend:
+            st.markdown("*Click once = available ✅ · Click twice = not available ❌ · Click three times = clear ⬜*")
+ 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 · EVENTS
 # ══════════════════════════════════════════════════════════════════════════════
 def ideas_tab(tab, sheet_tab, label):
     with tab:
         st.subheader(f"{label} Ideas")
-
+ 
         try:
             df = read_sheet(sheet_tab)
         except Exception as e:
             st.error(f"Could not load data: {e}")
             df = pd.DataFrame()
-
+ 
         # Show existing ideas
         if not df.empty:
             st.markdown(f"#### Current {label} Suggestions")
@@ -225,9 +326,9 @@ def ideas_tab(tab, sheet_tab, label):
                         c3.markdown(f"💰 **${price}**")
         else:
             st.info(f"No {label.lower()} ideas yet — be the first to add one!")
-
+ 
         st.divider()
-
+ 
         if not identified:
             st.info("Select your name in the sidebar to submit an idea.")
         else:
@@ -247,17 +348,17 @@ def ideas_tab(tab, sheet_tab, label):
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error saving: {e}")
-
+ 
 ideas_tab(tab2, "events", "Event")
 ideas_tab(tab3, "dining", "Dining")
-
+ 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 4 · VOTES
 # ══════════════════════════════════════════════════════════════════════════════
 with tab4:
     st.subheader("Cast Your Votes")
     st.caption("Rank your top 3 picks for events and dining. You can update anytime.")
-
+ 
     try:
         events_df = read_sheet("events")
         dining_df = read_sheet("dining")
@@ -265,10 +366,10 @@ with tab4:
     except Exception as e:
         st.error(f"Could not load voting data: {e}")
         events_df = dining_df = votes_df = pd.DataFrame()
-
+ 
     event_titles  = list(events_df["Title"]) if not events_df.empty and "Title" in events_df.columns else []
     dining_titles = list(dining_df["Title"]) if not dining_df.empty and "Title" in dining_df.columns else []
-
+ 
     # Tally votes
     def tally(df, col_prefix, titles):
         counts = {t: 0 for t in titles}
@@ -281,9 +382,9 @@ with tab4:
                 if pick in counts:
                     counts[pick] += w
         return counts
-
+ 
     c1, c2 = st.columns(2)
-
+ 
     with c1:
         st.markdown("#### 🎯 Event Vote Tally")
         if event_titles:
@@ -292,7 +393,7 @@ with tab4:
             st.dataframe(tally_df_e, use_container_width=True, hide_index=True)
         else:
             st.info("No events proposed yet.")
-
+ 
     with c2:
         st.markdown("#### 🍽️ Dining Vote Tally")
         if dining_titles:
@@ -301,9 +402,9 @@ with tab4:
             st.dataframe(tally_df_d, use_container_width=True, hide_index=True)
         else:
             st.info("No dining ideas proposed yet.")
-
+ 
     st.divider()
-
+ 
     if not identified:
         st.info("Select your name in the sidebar to vote.")
     else:
@@ -315,13 +416,13 @@ with tab4:
             if not match.empty:
                 existing_vote = match.iloc[0]
                 existing_vote_idx = match.index[0] + 2
-
+ 
         st.markdown(f"#### {user}'s Votes")
-
+ 
         none_opt = "— no pick —"
-
+ 
         col1, col2 = st.columns(2)
-
+ 
         with col1:
             st.markdown("**🎯 Event Rankings**")
             if event_titles:
@@ -335,7 +436,7 @@ with tab4:
             else:
                 st.info("Add event ideas first.")
                 e1 = e2 = e3 = none_opt
-
+ 
         with col2:
             st.markdown("**🍽️ Dining Rankings**")
             if dining_titles:
@@ -349,7 +450,7 @@ with tab4:
             else:
                 st.info("Add dining ideas first.")
                 d1 = d2 = d3 = none_opt
-
+ 
         if st.button("💾 Save Votes", type="primary"):
             def clean(v): return "" if v == none_opt else v
             row = [user, clean(e1), clean(e2), clean(e3), clean(d1), clean(d2), clean(d3)]
