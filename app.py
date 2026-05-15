@@ -4,7 +4,6 @@ import gspread
 from google.oauth2.service_account import Credentials
 from datetime import date, timedelta
 import json
-import streamlit.components.v1 as components
  
 # ── Config ───────────────────────────────────────────────────────────────────
 SHEET_ID = "18-q7ItMDfPkdvS7o01UzS4Xbyz6KmDDaTjcBTksoBlU"
@@ -251,162 +250,139 @@ with tab1:
     day_avail_names_json   = json.dumps(day_avail_names)
     day_unavail_names_json = json.dumps(day_unavail_names)
  
-    calendar_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Roboto:wght@300;400;500&display=swap');
-  *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{font-family:'Roboto',sans-serif;background:transparent}}
-  .cal-wrap{{background:#fff;border-radius:16px;border:1px solid #e0e0e0;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}}
-  .cal-header{{padding:18px 24px 10px;display:flex;align-items:center;gap:12px}}
-  .cal-title{{font-family:'Google Sans',sans-serif;font-size:20px;font-weight:400;color:#3c4043}}
-  .cal-legend{{display:flex;gap:14px;margin-left:auto;align-items:center;flex-wrap:wrap}}
-  .leg-item{{display:flex;align-items:center;gap:5px;font-size:11px;color:#5f6368}}
-  .leg-dot{{width:10px;height:10px;border-radius:50%}}
-  .lg{{background:#34a853}}.lr{{background:#ea4335}}.lgr{{background:#e0e0e0;border:1px solid #ccc}}
-  .dow-row{{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e0e0e0}}
-  .dow-cell{{text-align:center;padding:7px 0;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:#70757a}}
-  .cal-grid{{display:grid;grid-template-columns:repeat(7,1fr)}}
-  .cal-cell{{min-height:115px;border-right:1px solid #e8eaed;border-bottom:1px solid #e8eaed;padding:6px 4px;background:#fff;transition:background .12s;overflow:hidden}}
-  .cal-cell:nth-child(7n){{border-right:none}}
-  .empty{{background:#fafafa}}
-  .weekend{{background:#fafafa;cursor:default}}
-  .weekend .dn{{color:#bbb}}
-  .available{{background:#e6f4ea;cursor:pointer}}
-  .unavailable{{background:#fce8e6;cursor:pointer}}
-  .workday{{cursor:pointer}}
-  .workday:hover{{background:#f1f3f4}}
-  .available:hover{{background:#ceead6}}
-  .unavailable:hover{{background:#f5c6c3}}
-  .dn{{font-family:'Google Sans',sans-serif;font-size:12px;font-weight:500;color:#3c4043;
-       display:inline-flex;align-items:center;justify-content:center;
-       width:24px;height:24px;border-radius:50%;margin-bottom:2px}}
-  .available .dn{{background:#34a853;color:#fff}}
-  .unavailable .dn{{background:#ea4335;color:#fff}}
-  .nl{{display:flex;flex-direction:column;gap:2px;margin-top:2px}}
-  .nc{{font-size:9px;font-weight:500;padding:1px 4px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
-  .ncg{{background:#34a85322;color:#1a7a38;border:1px solid #34a85344}}
-  .ncr{{background:#ea433522;color:#b71c1c;border:1px solid #ea433544}}
-  .ncmg{{background:#34a853;color:#fff}}
-  .ncmr{{background:#ea4335;color:#fff}}
-  .save-row{{padding:14px 20px;border-top:1px solid #e0e0e0;display:flex;align-items:center;gap:14px;background:#fff;flex-wrap:wrap}}
-  .save-btn{{background:#1a73e8;color:#fff;border:none;border-radius:8px;padding:9px 24px;font-size:13px;font-weight:500;cursor:pointer;font-family:'Google Sans',sans-serif;transition:background .2s}}
-  .save-btn:hover{{background:#1557b0}}
-  .save-btn:disabled{{background:#ccc;cursor:default}}
-  .save-hint{{font-size:11px;color:#70757a}}
-  .save-msg{{font-size:12px;font-weight:500}}
-  .ok{{color:#34a853}}.err{{color:#ea4335}}
-  .no-id{{padding:16px 20px;color:#70757a;font-size:13px}}
-</style></head><body>
-<div class="cal-wrap">
-  <div class="cal-header">
-    <span class="cal-title">📅 June 2026</span>
-    <div class="cal-legend">
-      <div class="leg-item"><div class="leg-dot lg"></div>Available</div>
-      <div class="leg-item"><div class="leg-dot lr"></div>Not available</div>
-      <div class="leg-item"><div class="leg-dot lgr"></div>No response</div>
+    # ── Calendar rendered as HTML display only (no iframe save needed) ────────
+    # State is managed in st.session_state, toggled by Streamlit buttons
+    ss_key = f"cal_state_{user}"
+    if ss_key not in st.session_state or st.session_state.get(f"cal_user_loaded") != user:
+        st.session_state[ss_key] = dict(saved_state)
+        st.session_state["cal_user_loaded"] = user
+ 
+    cal_state = st.session_state[ss_key]
+ 
+    def cycle_day(day):
+        cur = cal_state.get(day, "")
+        cal_state[day] = "✓" if cur == "" else ("✗" if cur == "✓" else "")
+        st.session_state[ss_key] = cal_state
+ 
+    # Render calendar header
+    st.markdown("""
+    <style>
+    .cal-wrap{background:#fff;border-radius:16px;border:1px solid #e0e0e0;
+              overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);margin-bottom:8px}
+    .cal-header-row{padding:16px 20px 10px;display:flex;align-items:center;gap:12px;
+                    border-bottom:1px solid #e0e0e0}
+    .cal-title-txt{font-family:sans-serif;font-size:18px;font-weight:500;color:#3c4043}
+    .cal-legend{display:flex;gap:14px;margin-left:auto;align-items:center}
+    .leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#5f6368}
+    .leg-dot{width:10px;height:10px;border-radius:50%}
+    .lg{background:#34a853}.lr{background:#ea4335}.lgr{background:#e0e0e0;border:1px solid #ccc}
+    .dow-header{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e0e0e0;
+                background:#fff}
+    .dow-cell{text-align:center;padding:7px 0;font-size:10px;font-weight:600;
+              text-transform:uppercase;letter-spacing:.08em;color:#70757a}
+    /* override Streamlit button styles inside calendar */
+    div[data-testid="stHorizontalBlock"] { gap: 2px !important; }
+    </style>
+    <div class="cal-wrap">
+      <div class="cal-header-row">
+        <span class="cal-title-txt">📅 June 2026</span>
+        <div class="cal-legend">
+          <div class="leg-item"><div class="leg-dot lg"></div>Available</div>
+          <div class="leg-item"><div class="leg-dot lr"></div>Not available</div>
+          <div class="leg-item"><div class="leg-dot lgr"></div>No response</div>
+        </div>
+      </div>
+      <div class="dow-header">
+        <div class="dow-cell">Mon</div><div class="dow-cell">Tue</div>
+        <div class="dow-cell">Wed</div><div class="dow-cell">Thu</div>
+        <div class="dow-cell">Fri</div>
+        <div class="dow-cell" style="color:#ddd">Sat</div>
+        <div class="dow-cell" style="color:#ddd">Sun</div>
+      </div>
     </div>
-  </div>
-  <div class="dow-row">
-    <div class="dow-cell">Mon</div><div class="dow-cell">Tue</div>
-    <div class="dow-cell">Wed</div><div class="dow-cell">Thu</div>
-    <div class="dow-cell">Fri</div>
-    <div class="dow-cell" style="color:#bbb">Sat</div>
-    <div class="dow-cell" style="color:#bbb">Sun</div>
-  </div>
-  <div class="cal-grid" id="calGrid"></div>
-  <div class="save-row" id="saveRow">
-    <button class="save-btn" id="saveBtn" onclick="saveData()">💾 Save Availability</button>
-    <span class="save-hint">Click once = available · again = not available · again = clear</span>
-    <span class="save-msg" id="saveMsg"></span>
-  </div>
-</div>
-<script>
-const IDENTIFIED={identified_js};
-const USER={user_js};
-const GRID_DATA={grid_data_json};
-const JUNE_DAYS={june_days_json};
-const AVAIL_NAMES={day_avail_names_json};
-const UNAVAIL_NAMES={day_unavail_names_json};
-let state={saved_state_json};
+    """, unsafe_allow_html=True)
  
-function cycle(s){{ return s===""?"✓":s==="✓"?"✗":""; }}
-function cellCls(ds){{
-  if(!IDENTIFIED) return "cal-cell workday";
-  const s=state[ds]||"";
-  if(s==="✓") return "cal-cell available";
-  if(s==="✗") return "cal-cell unavailable";
-  return "cal-cell workday";
-}}
-function render(){{
-  const g=document.getElementById("calGrid");
-  g.innerHTML="";
-  GRID_DATA.forEach(cell=>{{
-    const div=document.createElement("div");
-    if(cell.day_num===null){{ div.className="cal-cell empty"; g.appendChild(div); return; }}
-    if(!cell.is_weekday){{ div.className="cal-cell weekend"; div.innerHTML=`<span class="dn">${{cell.day_num}}</span>`; g.appendChild(div); return; }}
-    const ds=cell.day_str; const s=state[ds]||"";
-    div.className=cellCls(ds);
-    if(IDENTIFIED) div.onclick=()=>{{ state[ds]=cycle(state[ds]||""); render(); }};
-    const av=(AVAIL_NAMES[ds]||[]).filter(n=>n!==USER);
-    const un=(UNAVAIL_NAMES[ds]||[]).filter(n=>n!==USER);
-    let chips='<div class="nl">';
-    if(s==="✓") chips+=`<span class="nc ncmg">✓ ${{USER}}</span>`;
-    if(s==="✗") chips+=`<span class="nc ncmr">✗ ${{USER}}</span>`;
-    av.forEach(n=>{{ chips+=`<span class="nc ncg">${{n}}</span>`; }});
-    un.forEach(n=>{{ chips+=`<span class="nc ncr">${{n}}</span>`; }});
-    chips+='</div>';
-    div.innerHTML=`<span class="dn">${{cell.day_num}}</span>${{chips}}`;
-    g.appendChild(div);
-  }});
-}}
-function saveData(){{
-  if(!IDENTIFIED) return;
-  const btn=document.getElementById("saveBtn");
-  const msg=document.getElementById("saveMsg");
-  btn.disabled=true; btn.textContent="Saving..."; msg.textContent="";
-  const avail=JUNE_DAYS.filter(d=>state[d]==="✓").map(d=>encodeURIComponent(d)).join("|");
-  const unavail=JUNE_DAYS.filter(d=>state[d]==="✗").map(d=>encodeURIComponent(d)).join("|");
-  const url=new URL(window.parent.location.href);
-  url.searchParams.set("cal_avail",avail);
-  url.searchParams.set("cal_unavail",unavail);
-  url.searchParams.set("cal_user",USER);
-  url.searchParams.set("cal_save","1");
-  window.parent.history.replaceState({{}},"",url.toString());
-  setTimeout(()=>{{
-    btn.disabled=false; btn.textContent="💾 Save Availability";
-    msg.className="save-msg ok"; msg.textContent="✅ Saved!";
-  }},400);
-}}
-if(!IDENTIFIED) document.getElementById("saveRow").innerHTML='<div class="no-id">👈 Select your name in the sidebar first.</div>';
-render();
-</script></body></html>"""
+    # Render calendar weeks as Streamlit columns
+    # Group grid into rows of 7
+    rows_of_7 = [grid[i:i+7] for i in range(0, len(grid), 7)]
  
-    components.html(calendar_html, height=780, scrolling=False)
+    for week_row in rows_of_7:
+        cols = st.columns(7, gap="small")
+        for ci, cell in enumerate(week_row):
+            with cols[ci]:
+                if cell is None or (not cell.weekday() < 5 if cell else True):
+                    # Empty or weekend — just show the day number greyed out
+                    if cell is not None:
+                        st.markdown(
+                            f"<div style='text-align:center;padding:8px 4px;"
+                            f"min-height:100px;background:#fafafa;border:1px solid #f0f0f0;"
+                            f"border-radius:4px;color:#ccc;font-size:12px'>{cell.day}</div>",
+                            unsafe_allow_html=True)
+                    else:
+                        st.markdown(
+                            "<div style='min-height:100px;background:#fafafa;"
+                            "border:1px solid #f0f0f0;border-radius:4px'></div>",
+                            unsafe_allow_html=True)
+                else:
+                    # Weekday cell
+                    ds = cell.strftime("%a %b %d")
+                    s  = cal_state.get(ds, "")
  
-    # Auto-commit when JS save was triggered via URL params
+                    # Cell background colour
+                    if s == "✓":
+                        bg = "#e6f4ea"; num_bg = "#34a853"; num_col = "#fff"
+                    elif s == "✗":
+                        bg = "#fce8e6"; num_bg = "#ea4335"; num_col = "#fff"
+                    else:
+                        bg = "#fff"; num_bg = "transparent"; num_col = "#3c4043"
+ 
+                    # Build name chips HTML
+                    chips = ""
+                    if identified:
+                        if s == "✓":
+                            chips += f"<span style='display:block;font-size:8.5px;font-weight:600;padding:1px 4px;border-radius:5px;background:#34a853;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                        elif s == "✗":
+                            chips += f"<span style='display:block;font-size:8.5px;font-weight:600;padding:1px 4px;border-radius:5px;background:#ea4335;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+ 
+                    for n in day_avail_names.get(ds, []):
+                        if n != user:
+                            chips += f"<span style='display:block;font-size:8.5px;padding:1px 4px;border-radius:5px;background:#34a85322;color:#1a7a38;border:1px solid #34a85344;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                    for n in day_unavail_names.get(ds, []):
+                        if n != user:
+                            chips += f"<span style='display:block;font-size:8.5px;padding:1px 4px;border-radius:5px;background:#ea433522;color:#b71c1c;border:1px solid #ea433544;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+ 
+                    st.markdown(
+                        f"<div style='background:{bg};border:1px solid #e8eaed;border-radius:4px;"
+                        f"padding:5px 4px;min-height:100px;cursor:pointer'>"
+                        f"<span style='display:inline-flex;align-items:center;justify-content:center;"
+                        f"width:22px;height:22px;border-radius:50%;background:{num_bg};color:{num_col};"
+                        f"font-size:11px;font-weight:600;margin-bottom:3px'>{cell.day}</span>"
+                        f"<div>{chips}</div></div>",
+                        unsafe_allow_html=True)
+ 
+                    if identified:
+                        if st.button("toggle", key=f"btn_{ds}",
+                                     help=f"Click to toggle {ds}",
+                                     use_container_width=True):
+                            cycle_day(ds)
+                            st.rerun()
+ 
+    st.markdown("<br>", unsafe_allow_html=True)
+ 
     if identified:
-        qp = st.query_params
-        if qp.get("cal_save") == "1" and qp.get("cal_user") == user:
-            avail_raw   = qp.get("cal_avail", "")
-            unavail_raw = qp.get("cal_unavail", "")
-            avail_days   = set(avail_raw.split("|"))   if avail_raw   else set()
-            unavail_days = set(unavail_raw.split("|")) if unavail_raw else set()
-            current_state = {}
-            for d in JUNE_DAYS:
-                if d in avail_days:     current_state[d] = "✓"
-                elif d in unavail_days: current_state[d] = "✗"
-                else:                   current_state[d] = ""
-            row = [user] + [current_state.get(d, "") for d in JUNE_DAYS]
+        if st.button("💾 Save Availability", type="primary"):
+            row = [user] + [cal_state.get(d, "") for d in JUNE_DAYS]
             try:
                 if existing_idx:
                     update_row("availability", existing_idx, row)
                 else:
                     append_row("availability", row)
                 read_sheet.clear()
-                st.query_params.clear()
+                st.success("✅ Availability saved to Google Sheets!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving availability: {e}")
+        st.caption("Click any date to toggle · green = available · red = not available · click again to clear")
  
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 & 3 · EVENTS + DINING
