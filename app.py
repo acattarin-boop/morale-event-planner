@@ -253,7 +253,7 @@ with tab1:
     # ── Calendar rendered as HTML display only (no iframe save needed) ────────
     # State is managed in st.session_state, toggled by Streamlit buttons
     ss_key = f"cal_state_{user}"
-    if ss_key not in st.session_state or st.session_state.get(f"cal_user_loaded") != user:
+    if ss_key not in st.session_state or st.session_state.get("cal_user_loaded") != user:
         st.session_state[ss_key] = dict(saved_state)
         st.session_state["cal_user_loaded"] = user
  
@@ -264,108 +264,124 @@ with tab1:
         cal_state[day] = "✓" if cur == "" else ("✗" if cur == "✓" else "")
         st.session_state[ss_key] = cal_state
  
-    # Render calendar header
+    # CSS: hide the button text/border and stretch it to fill the cell
+    # The markdown div sits behind; button is transparent overlay on top
     st.markdown("""
     <style>
-    .cal-wrap{background:#fff;border-radius:16px;border:1px solid #e0e0e0;
-              overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);margin-bottom:8px}
-    .cal-header-row{padding:16px 20px 10px;display:flex;align-items:center;gap:12px;
-                    border-bottom:1px solid #e0e0e0}
+    /* Calendar header */
+    .cal-hdr{background:#fff;border-radius:16px 16px 0 0;border:1px solid #e0e0e0;
+             border-bottom:none;padding:16px 20px 10px;display:flex;align-items:center;gap:12px}
     .cal-title-txt{font-family:sans-serif;font-size:18px;font-weight:500;color:#3c4043}
     .cal-legend{display:flex;gap:14px;margin-left:auto;align-items:center}
     .leg-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#5f6368}
     .leg-dot{width:10px;height:10px;border-radius:50%}
     .lg{background:#34a853}.lr{background:#ea4335}.lgr{background:#e0e0e0;border:1px solid #ccc}
-    .dow-header{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid #e0e0e0;
-                background:#fff}
+    .dow-hdr{display:grid;grid-template-columns:repeat(7,1fr);
+             border:1px solid #e0e0e0;border-top:none;border-bottom:none;background:#f8f9fa}
     .dow-cell{text-align:center;padding:7px 0;font-size:10px;font-weight:600;
               text-transform:uppercase;letter-spacing:.08em;color:#70757a}
-    /* override Streamlit button styles inside calendar */
-    div[data-testid="stHorizontalBlock"] { gap: 2px !important; }
+ 
+    /* Make Streamlit columns tight */
+    div[data-testid="stHorizontalBlock"]{gap:0px !important}
+    div[data-testid="stHorizontalBlock"] > div{padding:0 !important}
+ 
+    /* Cell container: position relative so button can overlay */
+    .cal-cell-wrap{position:relative;min-height:110px}
+ 
+    /* The invisible button stretches over the whole cell */
+    .cal-cell-wrap button[kind="secondary"]{
+        position:absolute !important;
+        top:0 !important; left:0 !important;
+        width:100% !important; height:100% !important;
+        background:transparent !important;
+        border:none !important;
+        color:transparent !important;
+        box-shadow:none !important;
+        cursor:pointer !important;
+        z-index:10;
+        padding:0 !important;
+        min-height:unset !important;
+    }
+    .cal-cell-wrap button[kind="secondary"]:hover{
+        background:rgba(0,0,0,0.04) !important;
+    }
     </style>
-    <div class="cal-wrap">
-      <div class="cal-header-row">
-        <span class="cal-title-txt">📅 June 2026</span>
-        <div class="cal-legend">
-          <div class="leg-item"><div class="leg-dot lg"></div>Available</div>
-          <div class="leg-item"><div class="leg-dot lr"></div>Not available</div>
-          <div class="leg-item"><div class="leg-dot lgr"></div>No response</div>
-        </div>
+ 
+    <div class="cal-hdr">
+      <span class="cal-title-txt">📅 June 2026</span>
+      <div class="cal-legend">
+        <div class="leg-item"><div class="leg-dot lg"></div>Available</div>
+        <div class="leg-item"><div class="leg-dot lr"></div>Not available</div>
+        <div class="leg-item"><div class="leg-dot lgr"></div>No response</div>
       </div>
-      <div class="dow-header">
-        <div class="dow-cell">Mon</div><div class="dow-cell">Tue</div>
-        <div class="dow-cell">Wed</div><div class="dow-cell">Thu</div>
-        <div class="dow-cell">Fri</div>
-        <div class="dow-cell" style="color:#ddd">Sat</div>
-        <div class="dow-cell" style="color:#ddd">Sun</div>
-      </div>
+    </div>
+    <div class="dow-hdr">
+      <div class="dow-cell">Mon</div><div class="dow-cell">Tue</div>
+      <div class="dow-cell">Wed</div><div class="dow-cell">Thu</div>
+      <div class="dow-cell">Fri</div>
+      <div class="dow-cell" style="color:#ccc">Sat</div>
+      <div class="dow-cell" style="color:#ccc">Sun</div>
     </div>
     """, unsafe_allow_html=True)
  
-    # Render calendar weeks as Streamlit columns
-    # Group grid into rows of 7
     rows_of_7 = [grid[i:i+7] for i in range(0, len(grid), 7)]
  
     for week_row in rows_of_7:
         cols = st.columns(7, gap="small")
         for ci, cell in enumerate(week_row):
             with cols[ci]:
-                if cell is None or (not cell.weekday() < 5 if cell else True):
-                    # Empty or weekend — just show the day number greyed out
-                    if cell is not None:
-                        st.markdown(
-                            f"<div style='text-align:center;padding:8px 4px;"
-                            f"min-height:100px;background:#fafafa;border:1px solid #f0f0f0;"
-                            f"border-radius:4px;color:#ccc;font-size:12px'>{cell.day}</div>",
-                            unsafe_allow_html=True)
-                    else:
-                        st.markdown(
-                            "<div style='min-height:100px;background:#fafafa;"
-                            "border:1px solid #f0f0f0;border-radius:4px'></div>",
-                            unsafe_allow_html=True)
+                if cell is None or cell.weekday() >= 5:
+                    # Empty padding or weekend
+                    day_label = str(cell.day) if cell else ""
+                    st.markdown(
+                        f"<div style='min-height:110px;background:#fafafa;"
+                        f"border:1px solid #eee;padding:6px 4px;"
+                        f"color:#ccc;font-size:11px'>{day_label}</div>",
+                        unsafe_allow_html=True)
                 else:
-                    # Weekday cell
                     ds = cell.strftime("%a %b %d")
                     s  = cal_state.get(ds, "")
  
-                    # Cell background colour
                     if s == "✓":
-                        bg = "#e6f4ea"; num_bg = "#34a853"; num_col = "#fff"
+                        bg = "#e6f4ea"; num_bg = "#34a853"; num_col = "#fff"; bdr = "#34a853"
                     elif s == "✗":
-                        bg = "#fce8e6"; num_bg = "#ea4335"; num_col = "#fff"
+                        bg = "#fce8e6"; num_bg = "#ea4335"; num_col = "#fff"; bdr = "#ea4335"
                     else:
-                        bg = "#fff"; num_bg = "transparent"; num_col = "#3c4043"
+                        bg = "#fff"; num_bg = "transparent"; num_col = "#3c4043"; bdr = "#e8eaed"
  
-                    # Build name chips HTML
+                    # Name chips
                     chips = ""
                     if identified:
                         if s == "✓":
-                            chips += f"<span style='display:block;font-size:8.5px;font-weight:600;padding:1px 4px;border-radius:5px;background:#34a853;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
+                            chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#34a853;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
                         elif s == "✗":
-                            chips += f"<span style='display:block;font-size:8.5px;font-weight:600;padding:1px 4px;border-radius:5px;background:#ea4335;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
- 
+                            chips += f"<span style='display:block;font-size:8px;font-weight:600;padding:1px 3px;border-radius:4px;background:#ea4335;color:#fff;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{user}</span>"
                     for n in day_avail_names.get(ds, []):
                         if n != user:
-                            chips += f"<span style='display:block;font-size:8.5px;padding:1px 4px;border-radius:5px;background:#34a85322;color:#1a7a38;border:1px solid #34a85344;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                            chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#34a85320;color:#1a7a38;border:1px solid #34a85340;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
                     for n in day_unavail_names.get(ds, []):
                         if n != user:
-                            chips += f"<span style='display:block;font-size:8.5px;padding:1px 4px;border-radius:5px;background:#ea433522;color:#b71c1c;border:1px solid #ea433544;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
+                            chips += f"<span style='display:block;font-size:8px;padding:1px 3px;border-radius:4px;background:#ea433520;color:#b71c1c;border:1px solid #ea433540;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{n}</span>"
  
+                    # Wrap in relative div so button can overlay
                     st.markdown(
-                        f"<div style='background:{bg};border:1px solid #e8eaed;border-radius:4px;"
-                        f"padding:5px 4px;min-height:100px;cursor:pointer'>"
+                        f"<div class='cal-cell-wrap'>"
+                        f"<div style='background:{bg};border:1px solid {bdr};"
+                        f"border-radius:4px;padding:5px 4px;min-height:110px;pointer-events:none'>"
                         f"<span style='display:inline-flex;align-items:center;justify-content:center;"
-                        f"width:22px;height:22px;border-radius:50%;background:{num_bg};color:{num_col};"
-                        f"font-size:11px;font-weight:600;margin-bottom:3px'>{cell.day}</span>"
-                        f"<div>{chips}</div></div>",
+                        f"width:22px;height:22px;border-radius:50%;background:{num_bg};"
+                        f"color:{num_col};font-size:11px;font-weight:600;margin-bottom:3px'>"
+                        f"{cell.day}</span>"
+                        f"<div>{chips}</div>"
+                        f"</div>",
                         unsafe_allow_html=True)
  
                     if identified:
-                        if st.button("toggle", key=f"btn_{ds}",
-                                     help=f"Click to toggle {ds}",
-                                     use_container_width=True):
+                        if st.button(" ", key=f"btn_{ds}", use_container_width=True):
                             cycle_day(ds)
                             st.rerun()
+ 
+                    st.markdown("</div>", unsafe_allow_html=True)
  
     st.markdown("<br>", unsafe_allow_html=True)
  
