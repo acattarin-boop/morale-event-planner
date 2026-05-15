@@ -48,6 +48,22 @@ def read_sheet(tab):
     padded = [r + [""] * (len(headers) - len(r)) for r in rows]
     return pd.DataFrame(padded, columns=headers)
  
+def init_availability_headers():
+    """Ensure the availability sheet has the correct header row."""
+    try:
+        sh = get_sheet()
+        ws = sh.worksheet("availability")
+        existing = ws.row_values(1)
+        expected = ["Name"] + JUNE_DAYS
+        if existing != expected:
+            # If sheet is empty or headers wrong, write correct headers
+            if not existing:
+                ws.append_row(expected)
+            else:
+                ws.update("A1", [expected])
+    except Exception:
+        pass  # Don't crash the app if this fails
+ 
 @st.cache_data(ttl=30)
 def read_names_from_sheet():
     """Read extra names persisted in the 'names' Google Sheet tab."""
@@ -93,6 +109,9 @@ h1, h2, h3 { font-family: 'DM Serif Display', serif; }
  
 st.title("🎉 Morale Event Planner")
 st.caption("Coordinate availability, propose ideas, and vote — all in one place.")
+ 
+# Ensure availability sheet has correct headers (fixes column mismatch)
+init_availability_headers()
  
 # ── Load names (persists across sessions via Google Sheet) ────────────────────
 extra_names = read_names_from_sheet()
@@ -145,6 +164,21 @@ with tab1:
     except Exception as e:
         st.error(f"Could not load availability data: {e}")
         avail_df = pd.DataFrame()
+ 
+    # Normalise avail_df column names to match JUNE_DAYS format exactly
+    # Build a mapping from normalised sheet header -> JUNE_DAYS key
+    if not avail_df.empty:
+        avail_df.columns = [c.strip() for c in avail_df.columns]
+        # Build a lookup: normalised-lowercase -> actual JUNE_DAY string
+        june_day_lookup = {d.lower().replace(" 0", " "): d for d in JUNE_DAYS}
+        # Rename sheet columns to match JUNE_DAYS if they differ only by zero-padding
+        rename_map = {}
+        for col in avail_df.columns:
+            normalised = col.lower().replace(" 0", " ")
+            if normalised in june_day_lookup and col != june_day_lookup[normalised]:
+                rename_map[col] = june_day_lookup[normalised]
+        if rename_map:
+            avail_df = avail_df.rename(columns=rename_map)
  
     # Per-day availability counts
     day_counts = {}
@@ -373,17 +407,6 @@ render();
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving availability: {e}")
- 
-    # Team table
-    if not avail_df.empty:
-        with st.expander("👥 View full team availability table"):
-            display_df = avail_df.set_index("Name") if "Name" in avail_df.columns else avail_df
-            def fmt_cell(v):
-                v = str(v).strip()
-                if v == "✓": return "✅"
-                if v == "✗": return "❌"
-                return ""
-            st.dataframe(display_df.map(fmt_cell), use_container_width=True)
  
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 & 3 · EVENTS + DINING
