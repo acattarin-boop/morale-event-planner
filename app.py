@@ -376,7 +376,7 @@ with tab1:
                         f"color:#ccc;font-size:11px;border-radius:4px'>{day_label}</div>",
                         unsafe_allow_html=True)
                 else:
-                    ds       = cell.strftime("%a %b %d")
+                    ds       = cell.strftime("%a %B %-d")
                     s        = cal_state.get(ds, "")
                     is_past  = cell < today
                     in_range = ds in ALL_DAYS
