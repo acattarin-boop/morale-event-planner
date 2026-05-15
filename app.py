@@ -332,12 +332,11 @@ with tab1:
              border:1px solid #e0e0e0;border-top:none;background:#f8f9fa}
     .dow-cell{text-align:center;padding:7px 0;font-size:10px;font-weight:600;
               text-transform:uppercase;letter-spacing:.08em;color:#70757a}
- 
-    /* Shrink calendar toggle buttons */
-    div[data-testid="stHorizontalBlock"] div[data-testid="stColumn"] button {
+    /* Only shrink buttons inside .cal-day-btn divs */
+    .cal-day-btn button {
         padding: 1px 2px !important;
-        min-height: 24px !important;
-        height: 24px !important;
+        min-height: 22px !important;
+        height: 22px !important;
         font-size: 11px !important;
         line-height: 1 !important;
     }
@@ -408,21 +407,21 @@ with tab1:
                         unsafe_allow_html=True)
  
                     if identified:
+                        st.markdown('<div class="cal-day-btn">', unsafe_allow_html=True)
                         b1, b2 = st.columns(2, gap="small")
                         with b1:
-                            # ✅ green checkmark — instant local update only
                             if st.button("✅", key=f"avail_{ds}",
                                          help="Mark available",
                                          use_container_width=True):
                                 set_day(ds, "✓")
                                 st.rerun()
                         with b2:
-                            # ❌ red X — instant local update only
                             if st.button("❌", key=f"unavail_{ds}",
                                          help="Mark not available",
                                          use_container_width=True):
                                 set_day(ds, "✗")
                                 st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
  
     st.markdown("<br>", unsafe_allow_html=True)
  
