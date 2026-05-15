@@ -112,10 +112,19 @@ def append_row(tab, row: list):
     ws = sh.worksheet(tab)
     ws.append_row(row, value_input_option="USER_ENTERED")
  
+def col_letter(n):
+    """Convert 1-based column number to A1 letter notation (handles AA, AB, etc.)."""
+    result = ""
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        result = chr(65 + rem) + result
+    return result
+ 
 def update_row(tab, row_index: int, row: list):
     sh = get_sheet()
     ws = sh.worksheet(tab)
-    ws.update(f"A{row_index}:{chr(64+len(row))}{row_index}", [row])
+    end_col = col_letter(len(row))
+    ws.update(f"A{row_index}:{end_col}{row_index}", [row])
  
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Morale Event Planner", page_icon="🎉", layout="wide")
@@ -691,4 +700,3 @@ with tab4:
                 st.rerun()
             except Exception as e:
                 st.error(f"Error saving votes: {e}")
- 
