@@ -54,7 +54,7 @@ DEFAULT_CONFIG = [
      "Dates to leave out, comma separated (YYYY-MM-DD)"),
     ("ideas_deadline", "2026-11-16", "Last day to add event or dining ideas (YYYY-MM-DD)"),
     ("voting_deadline", "2026-11-23", "Last day to vote (YYYY-MM-DD)"),
-    ("deadline", "2026-11-26", "Last day to enter availability (YYYY-MM-DD)"),
+    ("deadline", "2026-11-23", "Last day to enter availability (YYYY-MM-DD)"),
     ("timezone", "America/Los_Angeles", "Deadlines are 11:59 PM in this time zone"),
     ("lock_after_deadline", "yes", "yes = closed after each deadline, no = just show the dates"),
 ]
