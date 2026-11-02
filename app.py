@@ -1,7 +1,7 @@
 """Team morale event planner.
 
 Everything that changes per event lives in the Google Sheet, not in this file:
-  config tab  - title, date range, deadline, lock behaviour
+  config tab  - title, date range, deadlines, lock behaviour
   roster tab  - the names people can pick from
 
 Streamlit secrets required:
@@ -46,13 +46,17 @@ TABS = {
 
 DEFAULT_CONFIG = [
     ("event_title", "December Morale Event", "Shown at the top of the app"),
-    ("first_date", "2026-12-01", "First date people can choose (YYYY-MM-DD)"),
+    ("first_date", "2026-11-30", "First date people can choose (YYYY-MM-DD)"),
     ("last_date", "2026-12-31", "Last date people can choose (YYYY-MM-DD)"),
     ("weekdays_only", "yes", "yes = Monday to Friday only, no = include weekends"),
-    ("skip_dates", "", "Dates to leave out, comma separated (YYYY-MM-DD)"),
-    ("deadline", "2026-11-26", "Last day for responses (YYYY-MM-DD)"),
-    ("timezone", "America/Los_Angeles", "Deadline is 11:59 PM in this time zone"),
-    ("lock_after_deadline", "yes", "yes = read-only after the deadline, no = just show the date"),
+    ("skip_dates",
+     "2026-12-21, 2026-12-22, 2026-12-23, 2026-12-24, 2026-12-25, 2026-12-28, 2026-12-29",
+     "Dates to leave out, comma separated (YYYY-MM-DD)"),
+    ("ideas_deadline", "2026-11-16", "Last day to add event or dining ideas (YYYY-MM-DD)"),
+    ("voting_deadline", "2026-11-23", "Last day to vote (YYYY-MM-DD)"),
+    ("deadline", "2026-11-26", "Last day to enter availability (YYYY-MM-DD)"),
+    ("timezone", "America/Los_Angeles", "Deadlines are 11:59 PM in this time zone"),
+    ("lock_after_deadline", "yes", "yes = closed after each deadline, no = just show the dates"),
 ]
 
 YES, NO = "Yes", "No"
@@ -111,7 +115,17 @@ def ensure_tabs():
                 f"The '{tab}' tab starts with {first_row[:len(headers)]} "
                 f"but the app expects {headers}. Fix row 1 of that tab."
             )
+        elif tab == "config":
+            add_missing_settings(ws)
     return True
+
+
+def add_missing_settings(ws):
+    """Add settings introduced after the sheet was created. Existing rows are left alone."""
+    present = {value.strip() for value in ws.col_values(1)}
+    missing = [list(row) for row in DEFAULT_CONFIG if row[0] not in present]
+    if missing:
+        ws.append_rows(missing, value_input_option="RAW", table_range="A1")
 
 
 def seed_tab(ws, tab):
@@ -221,16 +235,29 @@ class Settings:
     last_date: date
     weekdays_only: bool
     skip_dates: tuple
-    deadline: datetime
+    ideas_deadline: datetime
+    voting_deadline: datetime
+    availability_deadline: datetime
     lock_after_deadline: bool
 
-    @property
-    def past_deadline(self):
-        return datetime.now(self.deadline.tzinfo) > self.deadline
+    def still_open(self, deadline):
+        return datetime.now(deadline.tzinfo) <= deadline or not self.lock_after_deadline
 
     @property
-    def is_open(self):
-        return not (self.past_deadline and self.lock_after_deadline)
+    def ideas_open(self):
+        return self.still_open(self.ideas_deadline)
+
+    @property
+    def voting_open(self):
+        return self.still_open(self.voting_deadline)
+
+    @property
+    def availability_open(self):
+        return self.still_open(self.availability_deadline)
+
+    @property
+    def any_open(self):
+        return self.ideas_open or self.voting_open or self.availability_open
 
     def days(self):
         result = []
@@ -261,14 +288,19 @@ def parse_settings(frame):
         raise SetupError("In the config tab, last_date is earlier than first_date.")
 
     skip = tuple(parse_date("skip_dates", part) for part in raw["skip_dates"].split(",") if part.strip())
-    deadline_day = parse_date("deadline", raw["deadline"])
+
+    def end_of(setting):
+        return datetime.combine(parse_date(setting, raw[setting]), time(23, 59, 59), tzinfo=zone)
+
     return Settings(
         event_title=raw["event_title"] or "Morale Event",
         first_date=first_date,
         last_date=last_date,
         weekdays_only=is_yes(raw["weekdays_only"]),
         skip_dates=skip,
-        deadline=datetime.combine(deadline_day, time(23, 59, 59), tzinfo=zone),
+        ideas_deadline=end_of("ideas_deadline"),
+        voting_deadline=end_of("voting_deadline"),
+        availability_deadline=end_of("deadline"),
         lock_after_deadline=is_yes(raw["lock_after_deadline"]),
     )
 
@@ -283,13 +315,29 @@ def day_label(day):
 
 
 def deadline_text(settings):
-    moment = settings.deadline
-    when = f"{moment.strftime('%a, %b')} {moment.day} at 11:59 PM {moment.strftime('%Z')}"
-    if settings.past_deadline:
-        return f"Responses closed {when}." if settings.lock_after_deadline else f"The deadline was {when}."
-    left = (moment.date() - datetime.now(moment.tzinfo).date()).days
-    countdown = "today" if left == 0 else "1 day left" if left == 1 else f"{left} days left"
-    return f"Respond by {when} ({countdown})."
+    """One line with each cutoff, plus a countdown on the next one to close."""
+    steps = [
+        ("Ideas", "close", settings.ideas_deadline, settings.ideas_open),
+        ("Voting", "closes", settings.voting_deadline, settings.voting_open),
+        ("Availability", "closes", settings.availability_deadline, settings.availability_open),
+    ]
+    parts = []
+    countdown_used = False
+    for label, verb, moment, is_open in sorted(steps, key=lambda step: step[2]):
+        when = f"{moment.strftime('%a, %b')} {moment.day}"
+        if not is_open:
+            parts.append(f"{label} closed {when}")
+            continue
+        text = f"{label} {verb} {when}"
+        if not countdown_used:
+            left = (moment.date() - datetime.now(moment.tzinfo).date()).days
+            if left >= 0:
+                countdown = "today" if left == 0 else "1 day left" if left == 1 else f"{left} days left"
+                text += f" ({countdown})"
+                countdown_used = True
+        parts.append(text)
+    zone = settings.availability_deadline.strftime("%Z")
+    return " · ".join(parts) + f". All at 11:59 PM {zone}."
 
 
 # --------------------------------------------------------------------------
@@ -463,20 +511,30 @@ def apply_style():
     )
 
 
+def calendar_heading(days):
+    first, last = days[0], days[-1]
+    if (first.year, first.month) == (last.year, last.month):
+        return f"{calendar.month_name[first.month]} {first.year}"
+    return f"{calendar.month_name[first.month]} to {calendar.month_name[last.month]} {last.year}"
+
+
 def calendar_grid(settings, days, render_day):
-    """Month grids with one bordered cell per selectable day."""
+    """One continuous grid, Monday first, with a bordered cell per selectable day."""
+    if not days:
+        st.warning("No dates are available. Check the date settings in the config tab.")
+        return
     selectable = set(days)
     columns = 5 if settings.weekdays_only else 7
-    for year, month in sorted({(d.year, d.month) for d in days}):
-        st.markdown(f"#### {calendar.month_name[month]} {year}")
-        for week in calendar.Calendar(firstweekday=0).monthdatescalendar(year, month):
-            week = week[:columns]
-            if not selectable.intersection(week):
-                continue
+    st.markdown(f"#### {calendar_heading(days)}")
+    monday = days[0] - timedelta(days=days[0].weekday())
+    while monday <= days[-1]:
+        week = [monday + timedelta(days=offset) for offset in range(columns)]
+        if selectable.intersection(week):
             for column, day in zip(st.columns(columns, gap="small"), week):
-                if day in selectable and day.month == month:
+                if day in selectable:
                     with column, st.container(border=True):
                         render_day(day)
+        monday += timedelta(days=7)
 
 
 def yes_chip(name, slots):
@@ -507,8 +565,8 @@ def availability_tab(settings, me, names, answers, days):
         top, chips = day_html(day, answers, names)
         st.markdown(top + chips, unsafe_allow_html=True)
 
-    if not settings.is_open:
-        st.info("Responses are closed. This is what everyone said.")
+    if not settings.availability_open:
+        st.info("Availability is closed. This is what everyone said.")
         calendar_grid(settings, days, read_only_day)
     elif not me:
         st.info("Choose your name above to fill this in.")
@@ -563,7 +621,7 @@ def availability_editor(settings, me, names, answers, days):
 
     calendar_grid(settings, days, editable_day)
 
-    if st.button("Save my availability", type="primary") and settings.is_open:
+    if st.button("Save my availability", type="primary") and settings.availability_open:
         try:
             upsert("availability", "Name", me, {"Name": me, **choices})
             flash("Availability saved")
@@ -601,8 +659,9 @@ def ideas_tab(settings, me, sheet_tab, label, frame):
             st.markdown(idea_card(row), unsafe_allow_html=True)
 
     with right:
-        if not settings.is_open:
-            st.info("Responses are closed.")
+        if not settings.ideas_open:
+            st.info("New ideas are closed. You can still vote on these until voting closes."
+                    if settings.voting_open else "Ideas and voting are closed.")
         elif not me:
             st.info("Choose your name above to suggest an idea.")
         else:
@@ -616,7 +675,7 @@ def ideas_tab(settings, me, sheet_tab, label, frame):
                 description = st.text_area("Description (optional)", height=80, key=f"desc_{field}")
                 link = st.text_input("Link (optional)", placeholder="https://", key=f"link_{field}")
                 submitted = st.form_submit_button("Add idea", type="primary")
-            if submitted and settings.is_open:
+            if submitted and settings.ideas_open:
                 add_idea(sheet_tab, me, title, description, link, price)
 
 
@@ -660,7 +719,7 @@ def votes_tab(settings, me, votes, event_titles, dining_titles):
     st.subheader("Vote")
     st.caption("Voting is optional. Pick as many or as few as you like, in either list, "
                "and change your vote until the deadline.")
-    if not settings.is_open:
+    if not settings.voting_open:
         st.info("Voting is closed. The Results tab has the final scores.")
         return
     if not me:
@@ -688,7 +747,7 @@ def votes_tab(settings, me, votes, event_titles, dining_titles):
                 st.info("No dining ideas yet.")
         saved = st.form_submit_button("Save my votes", type="primary")
 
-    if saved and settings.is_open:
+    if saved and settings.voting_open:
         chosen = {h: ("" if v == NO_PICK else v) for h, v in picks.items()}
         repeated = [
             kind for kind in ("Event", "Dining")
@@ -750,7 +809,7 @@ def who_are_you(settings, names):
 
     me = st.selectbox("Who are you?", names, index=None, placeholder="Choose your name", key="me")
 
-    if settings.is_open:
+    if settings.any_open:
         with st.expander("Don't see your name?"):
             with st.form("add_name", clear_on_submit=True, border=False):
                 new_name = st.text_input("Your name", max_chars=NAME_LIMIT)
